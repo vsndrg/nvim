@@ -19,3 +19,8 @@ vim.api.nvim_create_autocmd("FileType", {
   end,
 })
 
+vim.api.nvim_create_autocmd("BufEnter", {
+  callback = function()
+    vim.cmd(":set formatoptions-=ro")
+  end
+})

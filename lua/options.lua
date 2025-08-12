@@ -1,4 +1,5 @@
 vim.opt.clipboard:append("unnamedplus")
+vim.opt.guifont = { "JetBrainsMono Nerd Font", ":h14" }
 
 vim.o.number = true
 
@@ -10,3 +11,4 @@ vim.o.smartindent = true
 vim.g.mapleader = " "
 
 vim.o.winborder = 'rounded'
+

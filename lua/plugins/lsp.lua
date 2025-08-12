@@ -16,7 +16,7 @@ return {
         "lua_ls",
         "clangd",
         "jdtls",
-        -- "rust_analyzer",
+        "rust_analyzer",
       }
     }
   },
@@ -52,9 +52,37 @@ return {
       lspconfig.jdtls.setup({
         capabilities = capabilities
       })
-      lspconfig.rust_analyzer.setup({
+      -- replace your existing `lspconfig.rust_analyzer.setup({ ... })` block with this
+
+      local rust_opts = {
         capabilities = capabilities,
-      })
+        root_dir = util.root_pattern("Cargo.toml", "rust-project.json", ".git"),
+        settings = {
+          ["rust-analyzer"] = {
+            cargo = {
+              allFeatures = true,
+              loadOutDirsFromCheck = true,
+              runBuildScripts = true,
+            },
+            check = {
+              command = "clippy",
+              allTargets = true,
+            },
+            procMacro = {
+              enable = true,
+            },
+          },
+        },
+      }
+
+      -- If you use rust-tools or another plugin that auto-configures rust-analyzer,
+      -- let it own the setup to avoid starting two servers. Otherwise fall back to lspconfig.
+      local ok, rt = pcall(require, "rust-tools")
+      if ok and rt.setup then
+        rt.setup({ server = rust_opts })
+      else
+        lspconfig.rust_analyzer.setup(rust_opts)
+      end
 
       vim.diagnostic.config({
         float = { border = "rounded" }
