@@ -37,7 +37,7 @@ return {
         mappings = {
           ["l"] = "open",
           ["L"] = "open_vsplit",
-          ["K"] = "open_split",
+          ["<A-l>"] = "open_split",
           ["h"] = "close_node",
         },
       },

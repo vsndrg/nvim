@@ -130,6 +130,12 @@ return {
       vim.keymap.set('n', '<Leader>do', dap.step_over, {})
       vim.keymap.set('n', '<Leader>dO', dap.step_out, {})
       vim.keymap.set('n', '<Leader>dl', dap.run_last, {})
+
+      vim.keymap.set('n', '<A-l>', dap.step_into, {})
+      vim.keymap.set('n', '<A-j>', dap.step_over, {})
+      vim.keymap.set('n', '<A-h>', dap.step_out, {})
+      vim.keymap.set('n', '<A-k>', dap.run_last, {})
+
       vim.keymap.set('n', '<Leader>dw', function()
         require('dapui').elements.watches.add(vim.fn.expand('<cword>'))
       end)
