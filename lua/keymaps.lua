@@ -17,6 +17,9 @@ km.set("n", "<leader>j", "o<Esc>k", opts)
 km.set("n", "<leader>k", "O<Esc>j", opts)
 -- Add new line and place cursor after it in normal mode
 km.set("n", "<leader>o", "o<Esc>o", opts)
+km.set("n", "<leader>O", "O<Esc>O", opts)
+
+km.set("n", "<leader>;", "A;<Esc>", opts)
 
 -- Add space after cursor in normal mode
 km.set("n", "<leader>-", "a <Esc><Left>", opts)
@@ -47,10 +50,10 @@ km.set('n', '<C-l>', '<C-w>l', opts)
 -- Open new window command
 km.set('n', '<C-s>', ':vs ', opts)
 
-km.set('n', '<C-Shift-h>', ':vertical resize -1<CR>', opts)
-km.set('n', '<C-Shift-l>', ':vertical resize +1<CR>', opts)
-km.set('n', '<C-Shift-j>', ':resize -1<CR>', opts)
-km.set('n', '<C-Shift-k>', ':resize +1<CR>', opts)
+km.set('n', '<C-S-h>', ':vertical resize -1<CR>', opts)
+km.set('n', '<C-S-l>', ':vertical resize +1<CR>', opts)
+km.set('n', '<C-S-j>', ':resize -1<CR>', opts)
+km.set('n', '<C-S-k>', ':resize +1<CR>', opts)
 
 km.set('v', '<M-k>', ":m '<-2<CR>gv=gv", opts)
 km.set('v', '<M-j>', ":m '>+1<CR>gv=gv", opts)

@@ -35,9 +35,9 @@ return {
           nowait = true,
         },
         mappings = {
-          -- 'l' to open files or expand directories
           ["l"] = "open",
-          -- 'h' to close/collapse directories
+          ["L"] = "open_vsplit",
+          ["K"] = "open_split",
           ["h"] = "close_node",
         },
       },

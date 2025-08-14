@@ -52,7 +52,6 @@ return {
       lspconfig.jdtls.setup({
         capabilities = capabilities
       })
-      -- replace your existing `lspconfig.rust_analyzer.setup({ ... })` block with this
 
       local rust_opts = {
         capabilities = capabilities,
