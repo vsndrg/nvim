@@ -140,26 +140,6 @@ return {
         require('dapui').elements.watches.add(vim.fn.expand('<cword>'))
       end)
 
-      vim.keymap.set('n', '<Leader>dq', function()
-        require("dapui").close()
-        require("dap").terminate()
-        open_neotree()
-      end, { desc = "Quit debugger" })
-
-      vim.keymap.set('n', 'l', function()
-        local element = require("dapui.components").get_element_under_cursor()
-        if element then
-          require("dapui.components").expand(element)
-        end
-      end, { buffer = true })
-
-      vim.keymap.set('n', 'h', function()
-        local element = require("dapui.components").get_element_under_cursor()
-        if element then
-          require("dapui.components").collapse(element)
-        end
-      end, { buffer = true })
-
       dapui.setup()
     end,
   }

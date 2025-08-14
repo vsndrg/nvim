@@ -50,10 +50,10 @@ km.set('n', '<C-l>', '<C-w>l', opts)
 -- Open new window command
 km.set('n', '<C-s>', ':vs ', opts)
 
-km.set('n', '<C-S-h>', ':vertical resize -1<CR>', opts)
-km.set('n', '<C-S-l>', ':vertical resize +1<CR>', opts)
-km.set('n', '<C-S-j>', ':resize -1<CR>', opts)
-km.set('n', '<C-S-k>', ':resize +1<CR>', opts)
+-- km.set('n', '<C-S-h>', ':vertical resize -1<CR>', opts)
+-- km.set('n', '<C-S-l>', ':vertical resize +1<CR>', opts)
+-- km.set('n', '<C-S-j>', ':resize -1<CR>', opts)
+-- km.set('n', '<C-S-k>', ':resize +1<CR>', opts)
 
 km.set('v', '<M-k>', ":m '<-2<CR>gv=gv", opts)
 km.set('v', '<M-j>', ":m '>+1<CR>gv=gv", opts)
@@ -76,6 +76,7 @@ vim.keymap.set('n', '<leader>t', function()
   -- change Neovim’s working directory
   vim.cmd('lcd ' .. filedir)
   -- open a terminal
-  vim.cmd('terminal')
+  vim.cmd('belowright split | terminal')
+  vim.cmd('startinsert')
 end, { desc = 'Open terminal in current file directory' })
 

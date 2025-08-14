@@ -24,3 +24,10 @@ vim.api.nvim_create_autocmd("BufEnter", {
     vim.cmd(":set formatoptions-=ro")
   end
 })
+
+vim.api.nvim_create_autocmd("VimEnter", {
+  callback = function()
+    vim.cmd("Neotree toggle filesystem left")
+  end
+})
+

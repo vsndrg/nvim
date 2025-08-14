@@ -10,7 +10,7 @@ return {
   config = function()
     require("neo-tree").setup({
       -- close Neo-tree when it's the last window left
-      close_if_last_window = true,
+      -- close_if_last_window = true,
 
       filesystem = {
         -- show all hidden files and dotfiles

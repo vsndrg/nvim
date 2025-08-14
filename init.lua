@@ -19,5 +19,6 @@ local opts = {}
 require("options")
 require("keymaps")
 require("autocmds")
+require("windows")
 require("lazy").setup("plugins")
 
