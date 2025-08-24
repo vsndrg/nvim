@@ -136,9 +136,22 @@ return {
       vim.keymap.set('n', '<A-h>', dap.step_out, {})
       vim.keymap.set('n', '<A-k>', dap.run_last, {})
 
+      vim.api.nvim_create_autocmd("BufEnter", {
+        pattern = "[dap-terminal] Launch (codelldb)",
+        callback = function()
+          -- Go to insert mode automatically
+          vim.cmd("startinsert")
+        end,
+      })
+
       vim.keymap.set('n', '<Leader>dw', function()
         require('dapui').elements.watches.add(vim.fn.expand('<cword>'))
       end)
+
+      vim.keymap.set('n', '<Leader>dq', function()
+        require("dapui").close()
+        require("dap").terminate()
+      end, { desc = "Quit debugger" })
 
       dapui.setup()
     end,

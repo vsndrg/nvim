@@ -47,13 +47,11 @@ km.set('n', '<C-j>', '<C-w>j', opts)
 km.set('n', '<C-k>', '<C-w>k', opts)
 km.set('n', '<C-l>', '<C-w>l', opts)
 
--- Open new window command
-km.set('n', '<C-s>', ':vs ', opts)
-
--- km.set('n', '<C-S-h>', ':vertical resize -1<CR>', opts)
--- km.set('n', '<C-S-l>', ':vertical resize +1<CR>', opts)
--- km.set('n', '<C-S-j>', ':resize -1<CR>', opts)
--- km.set('n', '<C-S-k>', ':resize +1<CR>', opts)
+-- PageUp/Down
+km.set('n', '<C-u>', '<C-u>zz', opts)
+km.set('n', '<C-d>', '<C-d>zz', opts)
+-- km.set('n', '<C-f>', '<C-f>zz', opts)
+-- km.set('n', '<C-b>', '<C-b>zz', opts)
 
 km.set('v', '<M-k>', ":m '<-2<CR>gv=gv", opts)
 km.set('v', '<M-j>', ":m '>+1<CR>gv=gv", opts)
