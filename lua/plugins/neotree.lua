@@ -21,7 +21,19 @@ return {
           hide_hidden = false,
         },
 
+        follow_current_file = {
+          enabled = true,
+          leave_dirs_open = true,
+        },
+
         use_libuv_file_watcher = true
+      },
+
+      buffers = {
+        follow_current_file = {
+          enabled = true,
+          leave_dirs_open = true,
+        },
       },
 
       default_component_configs = {
