@@ -20,5 +20,10 @@ require("options")
 require("keymaps")
 require("autocmds")
 require("windows")
-require("lazy").setup("plugins")
+require("lazy").setup("plugins", {
+  change_detection = {
+    enabled = true,
+    notify = false,
+  },
+})
 
