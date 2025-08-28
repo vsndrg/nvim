@@ -16,6 +16,7 @@ return {
       presets = {
         bottom_search = false,
         command_palette = true,
+        lsp_doc_border = true,
       },
       routes = {
         {
