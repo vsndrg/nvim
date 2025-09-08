@@ -10,6 +10,7 @@ return {
     "mason-org/mason-lspconfig.nvim",
     lazy = false,
     opts = {
+      automatic_enable = false,
       auto_install = true,
       automatic_setup = false,
       ensure_installed = {
@@ -17,8 +18,13 @@ return {
         "clangd",
         "jdtls",
         "rust_analyzer",
+        "pyright",
       }
     }
+  },
+  {
+    "mfussenegger/nvim-jdtls",
+    ft = "java"
   },
   {
     "neovim/nvim-lspconfig",
@@ -49,9 +55,25 @@ return {
       lspconfig.clangd.setup({
         capabilities = capabilities
       })
-      lspconfig.jdtls.setup({
-        capabilities = capabilities
-      })
+      -- lspconfig.jdtls.setup({
+      --   capabilities = capabilities
+      -- })
+      -- lspconfig.pylsp.setup({
+      --   capabilities = capabilities,
+      --   root_dir = util.root_pattern(".git", "pyproject.toml", "setup.py", "requirements.txt"),
+      -- })
+      lspconfig.pyright.setup{
+        -- on_attach = on_attach,
+        settings = {
+          python = {
+            analysis = {
+              typeCheckingMode = "basic",
+              autoSearchPaths = true,
+              useLibraryCodeForTypes = true,
+            }
+          }
+        }
+      }
 
       local rust_opts = {
         capabilities = capabilities,
@@ -89,7 +111,8 @@ return {
 
       vim.keymap.set('n', 'K', vim.lsp.buf.hover, {})
       vim.keymap.set('n', 'gd', vim.lsp.buf.definition, {})
-      vim.keymap.set('n', 'rn', vim.lsp.buf.rename, {})
+      vim.keymap.set('n', 'gr', vim.lsp.buf.references, {})
+      -- vim.keymap.set('n', 'rn', vim.lsp.buf.rename, {})
 
       vim.keymap.set('n', '<leader>ca', vim.lsp.buf.code_action, {})
 
