@@ -30,7 +30,7 @@ return {
           completion = cmp.config.window.bordered(),
           documentation = cmp.config.window.bordered(),
         },
-        perfomance = {
+        performance = {
           max_view_entries = 12,
         },
         mapping = cmp.mapping.preset.insert({

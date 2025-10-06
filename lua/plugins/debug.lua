@@ -87,7 +87,7 @@ return {
           cwd = '${workspaceFolder}'
         },
       }
-      dap.configurations.cpp = dap.configurations.c
+      -- dap.configurations.cpp = dap.configurations.c
 
       dap.configurations.rust = {
         {
@@ -121,6 +121,61 @@ return {
         -- },
       }
 
+      dap.configurations.cpp = {
+        {
+          name = "Launch (codelldb)",
+          type = "codelldb",
+          request = "launch",
+          program = function()
+            local cwd = vim.fn.getcwd()
+            local name = vim.fn.fnamemodify(cwd, ":t")
+            local path = cwd .. "/build/" .. name
+            return path
+          end,
+          cwd = "${workspaceFolder}",
+          stopOnEntry = false,
+          console = 'integratedTerminal',
+          args = function()
+            local input = vim.fn.input("Program arguments (space-separated): ")
+            if input == "" then
+              return {}
+            end
+            return vim.split(input, "%s+")
+          end,
+        },
+      }
+
+      local uv = vim.loop
+
+      local function find_java_exec()
+        local java_home = os.getenv("JAVA_HOME")
+        if java_home then
+          return java_home .. "/bin/java"
+        else
+          -- fallback: try system java
+          local handle = io.popen("which java")
+          local result = handle:read("*a")
+          handle:close()
+          return result:gsub("%s+", "")
+        end
+      end
+
+      local function get_project_name()
+        return uv.fs_realpath(vim.fn.getcwd()):match("^.+/(.+)$")
+      end
+
+      dap.configurations.java = {
+        {
+          classPaths = {},        -- nvim-jdtls добавит зависимости автоматически
+          modulePaths = {},       -- для модульной системы
+          projectName = get_project_name(),
+          javaExec = find_java_exec(),
+          mainClass = nil,        -- nvim-jdtls определит автоматически
+          name = "Launch Java",
+          request = "launch",
+          type = "java",
+        },
+      }
       -- Debug keymaps
       vim.keymap.set('n', '<Leader>db', dap.toggle_breakpoint, {})
       vim.keymap.set('n', '<Leader>dr', dap.run_to_cursor, {})

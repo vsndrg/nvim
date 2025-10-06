@@ -12,14 +12,14 @@ return {
       require("telescope").setup{
         defaults = {
           mappings = {
-            n = {
-              ["l"] = actions.select_default,    -- press `l` to open selection (same as <CR>)
-              -- keep <CR> if you want both:
-              -- ["<CR>"] = actions.select_default,
-              -- optional extras:
-              -- ["L"] = actions.select_vertical, -- open in vertical split with Shift-l
-              -- ["s"] = actions.select_horizontal, -- open in horizontal split
-            },
+              n = {
+                ["l"] = actions.select_default,    -- press `l` to open selection (same as <CR>)
+                -- keep <CR> if you want both:
+                -- ["<CR>"] = actions.select_default,
+                -- optional extras:
+                -- ["L"] = actions.select_vertical, -- open in vertical split with Shift-l
+                -- ["s"] = actions.select_horizontal, -- open in horizontal split
+              },
           },
         },
       }

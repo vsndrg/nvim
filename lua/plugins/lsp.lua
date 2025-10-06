@@ -16,9 +16,11 @@ return {
       ensure_installed = {
         "lua_ls",
         "clangd",
-        "jdtls",
+        -- "jdtls",
         "rust_analyzer",
         "pyright",
+        "svls",
+        "verible",
       }
     }
   },
@@ -55,6 +57,19 @@ return {
       lspconfig.clangd.setup({
         capabilities = capabilities
       })
+
+      lspconfig.verible.setup({
+        capabilities = capabilities
+      })
+
+      -- lspconfig.verible = lspconfig.verible or {}
+      -- lspconfig.verible.setup({
+      --   cmd = { "verible-verilog-ls" },
+      --   filetypes = { "verilog", "systemverilog" },
+      --   capabilities = capabilities,
+      --   -- optional on_attach: reuse yours if you extract it; otherwise default behaviour
+      -- })
+
       -- lspconfig.jdtls.setup({
       --   capabilities = capabilities
       -- })
@@ -112,7 +127,7 @@ return {
       vim.keymap.set('n', 'K', vim.lsp.buf.hover, {})
       vim.keymap.set('n', 'gd', vim.lsp.buf.definition, {})
       vim.keymap.set('n', 'gr', vim.lsp.buf.references, {})
-      -- vim.keymap.set('n', 'rn', vim.lsp.buf.rename, {})
+      vim.keymap.set('n', 'rn', vim.lsp.buf.rename, {})
 
       vim.keymap.set('n', '<leader>ca', vim.lsp.buf.code_action, {})
 
@@ -122,6 +137,13 @@ return {
       -- Jump diagnostics
       vim.keymap.set('n', '[d', vim.diagnostic.goto_prev, {})
       vim.keymap.set('n', ']d', vim.diagnostic.goto_next, {})
+
+      -- vim.api.nvim_create_autocmd('FileType', {
+      --   pattern = 'java',
+      --   callback = function()
+      --     require('jdtls.jdtls_setup').setup()
+      --   end
+      -- })
 
     end
   }
