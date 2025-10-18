@@ -33,12 +33,30 @@ return {
     lazy = false,
     config = function()
       local capabilities = require('cmp_nvim_lsp').default_capabilities()
-      local lspconfig = require("lspconfig")
-      local util = require("lspconfig.util")
 
-      lspconfig.lua_ls.setup({
+      -- helper: make root_dir function that searches upward from the buffer file
+      local function make_root_dir(...)
+        local patterns = { ... }
+        return function(fname)
+          fname = fname or vim.api.nvim_buf_get_name(0)
+          if fname == "" then
+            return vim.loop.cwd()
+          end
+          local start_dir = vim.fs.dirname(fname)
+          for _, p in ipairs(patterns) do
+            local found = vim.fs.find(p, { path = start_dir, upward = true })
+            if found and #found > 0 then
+              return vim.fs.dirname(found[1])
+            end
+          end
+          return vim.loop.cwd()
+        end
+      end
+
+      -- lua_ls
+      vim.lsp.config('lua_ls', {
         capabilities = capabilities,
-        root_dir = util.root_pattern(".git", ".luarc.json", ".luarc.jsonc", "init.lua"), -- set root
+        root_dir = make_root_dir(".git", ".luarc.json", ".luarc.jsonc", "init.lua"),
         settings = {
           Lua = {
             runtime = {
@@ -54,31 +72,26 @@ return {
           },
         }
       })
-      lspconfig.clangd.setup({
-        capabilities = capabilities
+      vim.lsp.enable('lua_ls')
+
+      -- clangd
+      vim.lsp.config('clangd', {
+        capabilities = capabilities,
+        root_dir = make_root_dir(".git"),
       })
+      vim.lsp.enable('clangd')
 
-      lspconfig.verible.setup({
-        capabilities = capabilities
+      -- verible (verilog/systemverilog)
+      vim.lsp.config('verible', {
+        capabilities = capabilities,
+        root_dir = make_root_dir(".git"),
       })
+      vim.lsp.enable('verible')
 
-      -- lspconfig.verible = lspconfig.verible or {}
-      -- lspconfig.verible.setup({
-      --   cmd = { "verible-verilog-ls" },
-      --   filetypes = { "verilog", "systemverilog" },
-      --   capabilities = capabilities,
-      --   -- optional on_attach: reuse yours if you extract it; otherwise default behaviour
-      -- })
-
-      -- lspconfig.jdtls.setup({
-      --   capabilities = capabilities
-      -- })
-      -- lspconfig.pylsp.setup({
-      --   capabilities = capabilities,
-      --   root_dir = util.root_pattern(".git", "pyproject.toml", "setup.py", "requirements.txt"),
-      -- })
-      lspconfig.pyright.setup{
-        -- on_attach = on_attach,
+      -- pyright
+      vim.lsp.config('pyright', {
+        capabilities = capabilities,
+        root_dir = make_root_dir(".git", "pyproject.toml", "setup.py", "requirements.txt"),
         settings = {
           python = {
             analysis = {
@@ -88,11 +101,13 @@ return {
             }
           }
         }
-      }
+      })
+      vim.lsp.enable('pyright')
 
+      -- rust_analyzer: allow rust-tools to take ownership if present
       local rust_opts = {
         capabilities = capabilities,
-        root_dir = util.root_pattern("Cargo.toml", "rust-project.json", ".git"),
+        root_dir = make_root_dir("Cargo.toml", "rust-project.json", ".git"),
         settings = {
           ["rust-analyzer"] = {
             cargo = {
@@ -111,40 +126,33 @@ return {
         },
       }
 
-      -- If you use rust-tools or another plugin that auto-configures rust-analyzer,
-      -- let it own the setup to avoid starting two servers. Otherwise fall back to lspconfig.
       local ok, rt = pcall(require, "rust-tools")
       if ok and rt.setup then
         rt.setup({ server = rust_opts })
       else
-        lspconfig.rust_analyzer.setup(rust_opts)
+        vim.lsp.config('rust_analyzer', rust_opts)
+        vim.lsp.enable('rust_analyzer')
       end
 
+      -- diagnostics visual config
       vim.diagnostic.config({
         float = { border = "rounded" }
       })
 
+      -- keymaps
       vim.keymap.set('n', 'K', vim.lsp.buf.hover, {})
       vim.keymap.set('n', 'gd', vim.lsp.buf.definition, {})
       vim.keymap.set('n', 'gr', vim.lsp.buf.references, {})
       vim.keymap.set('n', 'rn', vim.lsp.buf.rename, {})
-
       vim.keymap.set('n', '<leader>ca', vim.lsp.buf.code_action, {})
-
-      -- Show diagnostics float on demand
       vim.keymap.set('n', 'gl', vim.diagnostic.open_float, {})
-
-      -- Jump diagnostics
       vim.keymap.set('n', '[d', vim.diagnostic.goto_prev, {})
       vim.keymap.set('n', ']d', vim.diagnostic.goto_next, {})
 
-      -- vim.api.nvim_create_autocmd('FileType', {
-      --   pattern = 'java',
-      --   callback = function()
-      --     require('jdtls.jdtls_setup').setup()
-      --   end
-      -- })
+      -- Note: jdtls handled by mfussenegger/nvim-jdtls plugin (ft=java). If you want to
+      -- use vim.lsp.config for jdtls as well, you can add a config block similar to above.
 
     end
   }
 }
+

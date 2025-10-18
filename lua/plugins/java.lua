@@ -10,7 +10,7 @@ return {
       local jdtls = require("jdtls")
 
       -- project root (same logic as your original)
-      local root_dir = require("jdtls.setup").find_root({ ".git", "mvnw", "gradlew" })
+      local root_dir = require("jdtls.setup").find_root({ ".git", "mvnw", "gradlew", "src" })
 
       -- helper values
       local sep = package.config:sub(1,1)

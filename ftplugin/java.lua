@@ -12,7 +12,7 @@ local capabilities = require("cmp_nvim_lsp").default_capabilities()
 
 local config = {
   cmd = { "jdtls", "-data", workspace_dir },
-  root_dir = require("jdtls.setup").find_root({ ".git", "mvnw", "gradlew" }),
+  root_dir = require("jdtls.setup").find_root({ ".git", "mvnw", "gradlew", "src" }),
   capabilities = capabilities,
 }
 

@@ -2,7 +2,7 @@
 -- Key Mappings
 -- ==============
 
-local opts = { noremap = true, silent = true } 
+local opts = { noremap = true, silent = true }
 local km = vim.keymap
 
 -- Save file command
@@ -21,13 +21,18 @@ km.set("n", "<leader>O", "O<Esc>O", opts)
 
 km.set("n", "<leader>;", "A;<Esc>", opts)
 
+-- Center cursor when searching
+km.set('n', 'n', "nzzzv", opts)
+km.set('n', 'N', "Nzzzv", opts)
+km.set('n', '*', "*zzzv", opts)
+km.set('n', '#', "#zzzv", opts)
+km.set('n', 'g*', "g*zzzv", opts)
+km.set('n', 'g#', "g#zzzv", opts)
+
 -- Add space after cursor in normal mode
 km.set("n", "<leader>-", "a <Esc><Left>", opts)
 -- Add space before cursor in normal mode
 km.set("n", "<leader>_", "i <Esc><Right>", opts)
-
--- Edit init.lua file command
-km.set("n", "<leader>e", ":e $MYVIMRC<CR>", opts)
 
 -- Save init.lua file command
 km.set("n", "<leader>s", ":source %<CR>", opts)
