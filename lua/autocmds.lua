@@ -3,7 +3,7 @@
 -- -- ===============
 
 vim.api.nvim_create_autocmd("FileType", {
-  pattern = { "c", "cpp", "java", "rust" },
+  pattern = { "c", "cpp", "java", "rust", "systemverilog" },
   callback = function()
     -- <expr> mapping: decide at runtime whether to just insert ';' or insert+Esc
     vim.keymap.set("i", ";", function()

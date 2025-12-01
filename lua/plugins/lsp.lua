@@ -19,7 +19,7 @@ return {
         -- "jdtls",
         "rust_analyzer",
         "pyright",
-        "svls",
+        -- "svls",
         "verible",
       }
     }
@@ -71,6 +71,10 @@ return {
         capabilities = capabilities
       })
 
+      -- lspconfig.svls.setup({
+      --   capabilities = capabilities
+      -- })
+
       lspconfig.verible.setup({
         capabilities = capabilities
       })
@@ -102,6 +106,23 @@ return {
           }
         }
       }
+
+      -- lspconfig.texlab.setup({
+      --   settings = {
+      --     texlab = {
+      --       build = {
+      --         executable = "latexmk",
+      --         args = { "-pdf", "-interaction=nonstopmode", "-synctex=1", "%f" },
+      --         onSave = true,
+      --       },
+      --       chktex = { onOpen = true, onSave = true },
+      --       forwardSearch = {
+      --         executable = "skim",
+      --         args = { "--synctex-forward", "%l:1:%f", "%p" },
+      --       },
+      --     },
+      --   },
+      -- })
 
       local rust_opts = {
         capabilities = capabilities,

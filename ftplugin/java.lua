@@ -16,6 +16,8 @@ local config = {
   capabilities = capabilities,
 }
 
+jdtls.start_or_attach(config)
+
 ------------------------------------------------------------------------------
 
 -- local overseer = require("overseer")
@@ -55,4 +57,3 @@ local config = {
 -- })
 
 
-jdtls.start_or_attach(config)
