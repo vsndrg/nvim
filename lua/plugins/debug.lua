@@ -3,7 +3,7 @@ return {
     "jay-babu/mason-nvim-dap.nvim",
     lazy = false,
     opts = {
-      ensure_installed = { "codelldb" },
+      ensure_installed = { "codelldb", "javadbg", "javatest" },
       automatic_installation = true,
     }
   },
