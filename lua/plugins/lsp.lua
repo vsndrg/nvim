@@ -25,10 +25,6 @@ return {
     }
   },
   {
-    "mfussenegger/nvim-jdtls",
-    ft = "java"
-  },
-  {
     "neovim/nvim-lspconfig",
     lazy = false,
     config = function()
@@ -95,7 +91,7 @@ return {
       --   root_dir = util.root_pattern(".git", "pyproject.toml", "setup.py", "requirements.txt"),
       -- })
       lspconfig.pyright.setup{
-        -- on_attach = on_attach,
+        capabilities = capabilities,
         settings = {
           python = {
             analysis = {
