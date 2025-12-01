@@ -224,6 +224,122 @@ vim.keymap.set("n", "<leader>pu", function()
   print("Project configuration updated")
 end, vim.tbl_extend("force", opts, { desc = "Update project config" }))
 
+-- ═══════════════════════════════════════════════════════════════════════════
+-- CREATE NEW CLASS (<leader>n...)
+-- ═══════════════════════════════════════════════════════════════════════════
+
+-- Helper: determine package name from directory path relative to root
+local function get_package_from_path(file_dir)
+  -- Get relative path from root_dir
+  local rel_path = file_dir:gsub("^" .. vim.pesc(root_dir) .. "/?", "")
+  -- Convert path separators to dots (package notation)
+  local package = rel_path:gsub("/", ".")
+  -- Remove leading/trailing dots
+  package = package:gsub("^%.+", ""):gsub("%.+$", "")
+  return package
+end
+
+-- Create new Java class
+local function create_java_class(class_type)
+  class_type = class_type or "class"
+  
+  -- Get current buffer's directory or use root_dir
+  local current_file = vim.api.nvim_buf_get_name(0)
+  local current_dir = current_file ~= "" and vim.fn.fnamemodify(current_file, ":p:h") or root_dir
+  
+  -- Ask for class name
+  vim.ui.input({ prompt = "Class name: " }, function(class_name)
+    if not class_name or class_name == "" then
+      return
+    end
+    
+    -- Validate class name (must start with uppercase, alphanumeric)
+    if not class_name:match("^%u[%w]*$") then
+      vim.notify("Invalid class name. Must start with uppercase letter.", vim.log.levels.ERROR)
+      return
+    end
+    
+    -- Ask for subdirectory (package path) - optional
+    vim.ui.input({ 
+      prompt = "Package subdirectory (relative to current dir, empty for current): ",
+      default = ""
+    }, function(subdir)
+      local target_dir = current_dir
+      if subdir and subdir ~= "" then
+        target_dir = current_dir .. "/" .. subdir
+        -- Create directory if it doesn't exist
+        vim.fn.mkdir(target_dir, "p")
+      end
+      
+      local package_name = get_package_from_path(target_dir)
+      local file_path = target_dir .. "/" .. class_name .. ".java"
+      
+      -- Check if file already exists
+      if vim.fn.filereadable(file_path) == 1 then
+        vim.notify("File already exists: " .. file_path, vim.log.levels.ERROR)
+        return
+      end
+      
+      -- Generate class template
+      local lines = {}
+      if package_name ~= "" then
+        table.insert(lines, "package " .. package_name .. ";")
+        table.insert(lines, "")
+      end
+      
+      if class_type == "class" then
+        table.insert(lines, "public class " .. class_name .. " {")
+        table.insert(lines, "    ")
+        table.insert(lines, "}")
+      elseif class_type == "interface" then
+        table.insert(lines, "public interface " .. class_name .. " {")
+        table.insert(lines, "    ")
+        table.insert(lines, "}")
+      elseif class_type == "enum" then
+        table.insert(lines, "public enum " .. class_name .. " {")
+        table.insert(lines, "    ")
+        table.insert(lines, "}")
+      elseif class_type == "record" then
+        table.insert(lines, "public record " .. class_name .. "() {")
+        table.insert(lines, "    ")
+        table.insert(lines, "}")
+      end
+      
+      -- Write file
+      vim.fn.writefile(lines, file_path)
+      
+      -- Open the new file
+      vim.cmd("edit " .. file_path)
+      
+      -- Position cursor inside the class body
+      local cursor_line = package_name ~= "" and 4 or 2
+      vim.api.nvim_win_set_cursor(0, { cursor_line, 4 })
+      
+      vim.notify("Created: " .. file_path, vim.log.levels.INFO)
+    end)
+  end)
+end
+
+-- New class
+vim.keymap.set("n", "<leader>cc", function()
+  create_java_class("class")
+end, vim.tbl_extend("force", opts, { desc = "New Java class" }))
+
+-- New interface
+vim.keymap.set("n", "<leader>ci", function()
+  create_java_class("interface")
+end, vim.tbl_extend("force", opts, { desc = "New Java interface" }))
+
+-- New enum
+vim.keymap.set("n", "<leader>ce", function()
+  create_java_class("enum")
+end, vim.tbl_extend("force", opts, { desc = "New Java enum" }))
+
+-- New record (Java 14+)
+vim.keymap.set("n", "<leader>cr", function()
+  create_java_class("record")
+end, vim.tbl_extend("force", opts, { desc = "New Java record" }))
+
 ------------------------------------------------------------------------------
 
 -- local overseer = require("overseer")
