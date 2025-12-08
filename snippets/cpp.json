@@ -1,0 +1,22 @@
+{
+  "reinterpret_cast": {
+    "prefix": "reinterpret_cast",
+    "body": "reinterpret_cast<$1>($2)",
+    "description": "reinterpret_cast<type>(expr)"
+  },
+  "static_cast": {
+    "prefix": "static_cast",
+    "body": "static_cast<$1>($2)",
+    "description": "static_cast<type>(expr)"
+  },
+  "dynamic_cast": {
+    "prefix": "dynamic_cast",
+    "body": "dynamic_cast<$1>($2)",
+    "description": "dynamic_cast<type>(expr)"
+  },
+  "const_cast": {
+    "prefix": "const_cast",
+    "body": "const_cast<$1>($2)",
+    "description": "const_cast<type>(expr)"
+  }
+}

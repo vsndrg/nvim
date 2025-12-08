@@ -29,6 +29,8 @@ return {
     lazy = false,
     config = function()
       local capabilities = require('cmp_nvim_lsp').default_capabilities()
+      -- Отключаем snippet support — LSP будет отдавать plain completions без плейсхолдеров
+      capabilities.textDocument.completion.completionItem.snippetSupport = false
 
       -- replace deprecated require("lspconfig") usage with a tiny shim that forwards
       -- calls like `lspconfig.NAME.setup(opts)` to the new API `vim.lsp.config/enable`
@@ -63,8 +65,38 @@ return {
           },
         }
       })
+      -- Расширенные capabilities для clangd
+      local clangd_capabilities = vim.deepcopy(capabilities)
+      clangd_capabilities.offsetEncoding = { "utf-16" }
+
+      -- Попробовать LLVM clangd (brew install llvm), иначе системный
+      local clangd_cmd = "clangd"
+      local llvm_clangd = "/opt/homebrew/opt/llvm/bin/clangd"
+      if vim.fn.executable(llvm_clangd) == 1 then
+        clangd_cmd = llvm_clangd
+      end
+
       lspconfig.clangd.setup({
-        capabilities = capabilities
+        capabilities = clangd_capabilities,
+        cmd = {
+          clangd_cmd,
+          "--background-index",           -- индексация в фоне
+          "--clang-tidy",                 -- включить clang-tidy
+          "--completion-style=detailed",  -- подробные completions
+          "--header-insertion=iwyu",      -- умная вставка #include
+          "--header-insertion-decorators",
+          -- БЕЗ --function-arg-placeholders — не подставлять аргументы автоматически
+          "--fallback-style=LLVM",        -- fallback стиль форматирования
+          "--all-scopes-completion",      -- completion из всех scope
+          "--pch-storage=memory",         -- precompiled headers в памяти
+          "--suggest-missing-includes",   -- предлагать недостающие includes
+          "-j=4",                         -- 4 потока для индексации
+        },
+        init_options = {
+          usePlaceholders = false,        -- НЕ использовать плейсхолдеры
+          completeUnimported = true,
+          clangdFileStatus = true,
+        },
       })
 
       -- lspconfig.svls.setup({

@@ -19,6 +19,14 @@ vim.api.nvim_create_autocmd("FileType", {
   end,
 })
 
+-- Signature help по Ctrl+k (единственный способ)
+vim.api.nvim_create_autocmd("LspAttach", {
+  callback = function(args)
+    vim.keymap.set("i", "<C-k>", vim.lsp.buf.signature_help, { buffer = args.buf, silent = true })
+    vim.keymap.set("n", "<C-k>", vim.lsp.buf.signature_help, { buffer = args.buf, silent = true })
+  end,
+})
+
 vim.api.nvim_create_autocmd("BufEnter", {
   callback = function()
     vim.cmd(":set formatoptions-=ro")

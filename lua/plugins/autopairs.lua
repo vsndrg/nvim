@@ -1,15 +1,19 @@
 return {
   {
     "windwp/nvim-autopairs",
-    event = "InsertEnter",  -- load when you enter insert mode
-    opts = {
-      check_ts = true,               -- use treesitter to better context-awareness
-      disable_filetype = { "TelescopePrompt", "spectre_panel" },
-      enable_afterquote = false,     -- don’t pair immediately after quote
-    },
-    -- or use config if you need to call setup yourself:
-    -- config = function(_, opts)
-    --   require("nvim-autopairs").setup(opts)
-    -- end,
+    event = "InsertEnter",
+    config = function()
+      local npairs = require("nvim-autopairs")
+      npairs.setup({
+        check_ts = true,
+        disable_filetype = { "TelescopePrompt", "spectre_panel" },
+        enable_afterquote = false,
+      })
+
+      -- Интеграция с cmp: автоматически добавлять () после выбора функции
+      local cmp_autopairs = require("nvim-autopairs.completion.cmp")
+      local cmp = require("cmp")
+      cmp.event:on("confirm_done", cmp_autopairs.on_confirm_done())
+    end,
   },
 }
