@@ -33,9 +33,9 @@ vim.api.nvim_create_autocmd("BufEnter", {
   end
 })
 
-vim.api.nvim_create_autocmd("VimEnter", {
-  callback = function()
-    vim.cmd("Neotree toggle filesystem left")
-  end
-})
+-- vim.api.nvim_create_autocmd("VimEnter", {
+--   callback = function()
+--     vim.cmd("Neotree toggle filesystem left")
+--   end
+-- })
 

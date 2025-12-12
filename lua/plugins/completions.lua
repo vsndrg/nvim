@@ -3,6 +3,32 @@ return {
     'hrsh7th/cmp-nvim-lsp'
   },
   {
+    'github/copilot.vim',
+    config = function()
+      -- Toggle Copilot on/off
+      vim.keymap.set('n', '<leader>cp', function()
+        if vim.b.copilot_enabled == false or vim.g.copilot_enabled == false then
+          vim.cmd('Copilot enable')
+          vim.g.copilot_enabled = true
+          vim.b.copilot_enabled = true
+          print('Copilot enabled')
+        else
+          vim.cmd('Copilot disable')
+          vim.g.copilot_enabled = false
+          vim.b.copilot_enabled = false
+          print('Copilot disabled')
+        end
+      end, { noremap = true, silent = true })
+      
+      -- Accept only one line of Copilot suggestion
+      vim.keymap.set('i', '<C-l>', 'copilot#AcceptLine()', {
+        expr = true,
+        replace_keycodes = false,
+        silent = true
+      })
+    end
+  },
+  {
     'L3MON4D3/LuaSnip',
     dependencies = {
       'saadparwaiz1/cmp_luasnip',
@@ -47,7 +73,8 @@ return {
           documentation = cmp.config.window.bordered(),
         },
         completion = {
-          completeopt = 'menu,menuone,noinsert',
+          completeopt = 'menu,menuone,noselect',
+          autocomplete = { require('cmp.types').cmp.TriggerEvent.TextChanged },
         },
         formatting = {
           fields = { "kind", "abbr", "menu" },
@@ -66,22 +93,23 @@ return {
           ['<C-b>'] = cmp.mapping.scroll_docs(-4),
           ['<C-f>'] = cmp.mapping.scroll_docs(4),
           ['<A-Space>'] = cmp.mapping.complete(),
-          ['<Tab>'] = cmp.mapping(function(fallback)
-            if cmp.visible() then
-              cmp.confirm({ select = true })
-            elseif luasnip.locally_jumpable(1) then
-              luasnip.jump(1)
-            else
-              fallback()
-            end
-          end, { "i", "s" }),
-          ['<S-Tab>'] = cmp.mapping(function(fallback)
-            if luasnip.locally_jumpable(-1) then
-              luasnip.jump(-1)
-            else
-              fallback()
-            end
-          end, { "i", "s" }),
+          -- Tab используется для Copilot
+          -- ['<Tab>'] = cmp.mapping(function(fallback)
+          --   if cmp.visible() then
+          --     cmp.confirm({ select = true })
+          --   elseif luasnip.locally_jumpable(1) then
+          --     luasnip.jump(1)
+          --   else
+          --     fallback()
+          --   end
+          -- end, { "i", "s" }),
+          -- ['<S-Tab>'] = cmp.mapping(function(fallback)
+          --   if luasnip.locally_jumpable(-1) then
+          --     luasnip.jump(-1)
+          --   else
+          --     fallback()
+          --   end
+          -- end, { "i", "s" }),
           ['<CR>'] = cmp.mapping.confirm({ select = false }),
           ['<A-h>'] = cmp.mapping.abort(),
           -- Esc: закрыть popup И перейти в normal mode
@@ -89,7 +117,7 @@ return {
             if cmp.visible() then
               cmp.abort()
             end
-            vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes('<Esc>', true, false, true), 'n', false)
+            vim.cmd("stopinsert")
           end, { "i", "s" }),
           ['<A-l>'] = cmp.mapping(function(fallback)
             if cmp.visible() then
@@ -117,7 +145,7 @@ return {
           { name = 'buffer', priority = 250, keyword_length = 3 },
         }),
         experimental = {
-          ghost_text = true,
+          ghost_text = false,
         },
       })
 

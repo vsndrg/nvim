@@ -5,8 +5,14 @@ return {
     config = function()
       local builtin = require("telescope.builtin")
       vim.keymap.set('n', '<leader>f', builtin.find_files, {})
-      vim.keymap.set('n', '<leader>l', builtin.live_grep, {})
+      vim.keymap.set('n', '<leader>g', builtin.live_grep, {})
       vim.keymap.set('n', '<leader>s', builtin.lsp_document_symbols, {})
+      vim.keymap.set('n', '<leader>b', function()
+        builtin.oldfiles({ initial_mode = "normal" })
+      end, {})
+      vim.keymap.set('n', '<C-b>', function()
+        vim.cmd('edit #')
+      end, {})
 
       local actions = require("telescope.actions")
       require("telescope").setup{

@@ -72,14 +72,17 @@ vim.keymap.set('n', '<leader>r', ':Run<CR>', opts)
 
 -- Open terminal by pressing <leader>t
 vim.keymap.set('n', '<leader>t', function()
-  -- get full path of the current buffer
-  local filepath = vim.api.nvim_buf_get_name(0)
-  -- extract the directory part
-  local filedir  = vim.fn.fnamemodify(filepath, ':p:h')
-  -- change Neovim’s working directory
-  vim.cmd('lcd ' .. filedir)
+  -- Find project root (look for .root file)
+  local root = vim.fn.findfile('.root', vim.fn.expand('%:p:h') .. ';')
+  if root ~= '' then
+    root = vim.fn.fnamemodify(root, ':p:h')
+  else
+    root = vim.fn.getcwd()
+  end
+  -- change Neovim's working directory
+  vim.cmd('lcd ' .. root)
   -- open a terminal
   vim.cmd('belowright split | terminal')
   vim.cmd('startinsert')
-end, { desc = 'Open terminal in current file directory' })
+end, { desc = 'Open terminal in project root' })
 

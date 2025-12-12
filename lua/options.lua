@@ -20,6 +20,13 @@ vim.o.winborder = 'rounded'
 
 vim.g.neovide_input_macos_option_key_is_meta = "both"
 
+-- Fix paste in Neovide for terminal, command-line, search
+if vim.g.neovide then
+  vim.keymap.set('c', '<D-v>', '<C-R>+', { noremap = true })
+  vim.keymap.set('i', '<D-v>', '<C-R>+', { noremap = true })
+  vim.keymap.set('t', '<D-v>', '<C-\\><C-n>"+pi', { noremap = true })
+end
+
 vim.g.python3_host_prog = os.getenv("HOME") .. "/.local/share/venvs/pynvim/bin/python"
 
 -- -- paste unnamed register with `p` in command-line

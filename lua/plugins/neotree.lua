@@ -57,5 +57,12 @@ return {
 
     -- toggle Neo-tree with <leader>n
     vim.keymap.set("n", "<leader>n", ":Neotree toggle filesystem left<CR>", { noremap = true, silent = true })
+
+    -- -- Закрыть Neo-tree перед выходом (для корректного сохранения сессии)
+    -- vim.api.nvim_create_autocmd("VimLeavePre", {
+    --   callback = function()
+    --     vim.cmd("Neotree close")
+    --   end,
+    -- })
   end
 }
