@@ -135,23 +135,6 @@ return {
         }
       }
 
-      -- lspconfig.texlab.setup({
-      --   settings = {
-      --     texlab = {
-      --       build = {
-      --         executable = "latexmk",
-      --         args = { "-pdf", "-interaction=nonstopmode", "-synctex=1", "%f" },
-      --         onSave = true,
-      --       },
-      --       chktex = { onOpen = true, onSave = true },
-      --       forwardSearch = {
-      --         executable = "skim",
-      --         args = { "--synctex-forward", "%l:1:%f", "%p" },
-      --       },
-      --     },
-      --   },
-      -- })
-
       local rust_opts = {
         capabilities = capabilities,
         root_dir = util.root_pattern("Cargo.toml", "rust-project.json", ".git"),

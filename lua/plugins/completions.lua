@@ -2,6 +2,8 @@ return {
   {
     'hrsh7th/cmp-nvim-lsp'
   },
+  -- cmp-latex-symbols removed: inserts unicode instead of LaTeX commands
+  -- texlab LSP provides proper \alpha, \beta etc. completions
   {
     'github/copilot.vim',
     config = function()
@@ -93,23 +95,35 @@ return {
           ['<C-b>'] = cmp.mapping.scroll_docs(-4),
           ['<C-f>'] = cmp.mapping.scroll_docs(4),
           ['<A-Space>'] = cmp.mapping.complete(),
-          -- Tab используется для Copilot
-          -- ['<Tab>'] = cmp.mapping(function(fallback)
-          --   if cmp.visible() then
-          --     cmp.confirm({ select = true })
-          --   elseif luasnip.locally_jumpable(1) then
-          --     luasnip.jump(1)
-          --   else
-          --     fallback()
-          --   end
-          -- end, { "i", "s" }),
-          -- ['<S-Tab>'] = cmp.mapping(function(fallback)
-          --   if luasnip.locally_jumpable(-1) then
-          --     luasnip.jump(-1)
-          --   else
-          --     fallback()
-          --   end
-          -- end, { "i", "s" }),
+          -- Tab: use cmp when Copilot is disabled, otherwise fall back to Copilot/default
+          ['<Tab>'] = cmp.mapping(function(fallback)
+            local copilot_off = (vim.b.copilot_enabled == false) or (vim.g.copilot_enabled == false)
+            if copilot_off then
+              if cmp.visible() then
+                cmp.confirm({ select = true })
+              elseif luasnip.expand_or_jumpable() then
+                luasnip.expand_or_jump()
+              else
+                cmp.complete()
+              end
+            else
+              fallback()
+            end
+          end, { "i", "s" }),
+          ['<S-Tab>'] = cmp.mapping(function(fallback)
+            local copilot_off = (vim.b.copilot_enabled == false) or (vim.g.copilot_enabled == false)
+            if copilot_off then
+              if cmp.visible() then
+                cmp.select_prev_item()
+              elseif luasnip.locally_jumpable(-1) then
+                luasnip.jump(-1)
+              else
+                fallback()
+              end
+            else
+              fallback()
+            end
+          end, { "i", "s" }),
           ['<CR>'] = cmp.mapping.confirm({ select = false }),
           ['<A-h>'] = cmp.mapping.abort(),
           -- Esc: закрыть popup И перейти в normal mode
