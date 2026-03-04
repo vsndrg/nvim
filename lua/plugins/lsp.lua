@@ -135,35 +135,7 @@ return {
         }
       }
 
-      local rust_opts = {
-        capabilities = capabilities,
-        root_dir = util.root_pattern("Cargo.toml", "rust-project.json", ".git"),
-        settings = {
-          ["rust-analyzer"] = {
-            cargo = {
-              allFeatures = true,
-              loadOutDirsFromCheck = true,
-              runBuildScripts = true,
-            },
-            check = {
-              command = "clippy",
-              allTargets = true,
-            },
-            procMacro = {
-              enable = true,
-            },
-          },
-        },
-      }
-
-      -- If you use rust-tools or another plugin that auto-configures rust-analyzer,
-      -- let it own the setup to avoid starting two servers. Otherwise fall back to lspconfig.
-      local ok, rt = pcall(require, "rust-tools")
-      if ok and rt.setup then
-        rt.setup({ server = rust_opts })
-      else
-        lspconfig.rust_analyzer.setup(rust_opts)
-      end
+      -- rust_analyzer managed by rustaceanvim (lua/plugins/rust.lua)
 
       vim.diagnostic.config({
         float = { border = "rounded" }
