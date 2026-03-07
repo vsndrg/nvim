@@ -64,7 +64,7 @@ km.set('v', 'p', "\"_dP", opts)
 
 vim.api.nvim_set_keymap('n', '<Leader>h', ':only<CR>:Vifm<CR>', opts)
 
-km.set('n', 'gb', '<C-o>', opts)
+km.set('n', 'gb', '<C-o>zz', opts)
 
 -- Map shortcuts
 vim.keymap.set('n', '<leader>c', ':Build<CR>', opts)

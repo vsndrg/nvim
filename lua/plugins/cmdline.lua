@@ -34,6 +34,6 @@ return {
         },
       },
     })
-    vim.keymap.set("n", "<leader>d", ":NoiceDismiss<CR>", { silent = true })
+    vim.keymap.set("n", "<leader>dm", ":NoiceDismiss<CR>", { silent = true })
   end
 }

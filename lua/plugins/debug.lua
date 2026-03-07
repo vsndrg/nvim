@@ -24,6 +24,15 @@ return {
       -- dap.listeners.before.event_terminated.dapui_config = function() dapui.close() end
       -- dap.listeners.before.event_exited.dapui_config = function() dapui.close() end
 
+      -- zz при каждой остановке отладчика (step, breakpoint, etc.)
+      dap.listeners.after.event_stopped.center_cursor = function()
+        vim.schedule(function()
+          if vim.bo.buftype ~= 'terminal' then
+            vim.cmd('normal! zz')
+          end
+        end)
+      end
+
       -- Auto open & close neotree
       local function close_neotree()
         vim.cmd("Neotree close")

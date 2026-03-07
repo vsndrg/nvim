@@ -165,7 +165,15 @@ return {
       })
 
       vim.keymap.set('n', 'K', vim.lsp.buf.hover, {})
-      vim.keymap.set('n', 'gd', vim.lsp.buf.definition, {})
+      vim.keymap.set('n', 'gd', function()
+        vim.lsp.buf.definition({
+          on_list = function(options)
+            vim.fn.setqflist({}, ' ', options)
+            vim.cmd('cfirst')
+            vim.cmd('normal! zz')
+          end,
+        })
+      end, {})
       vim.keymap.set('n', 'gr', vim.lsp.buf.references, {})
       vim.keymap.set('n', 'rn', vim.lsp.buf.rename, {})
 
