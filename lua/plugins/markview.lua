@@ -4,6 +4,7 @@ return {
   opts = {
     preview = {
       icon_provider = "mini",
+      hybrid_modes = { "n", "i" },
     },
   },
 }

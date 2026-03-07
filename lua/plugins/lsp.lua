@@ -68,6 +68,29 @@ return {
       -- Расширенные capabilities для clangd
       local clangd_capabilities = vim.deepcopy(capabilities)
       clangd_capabilities.offsetEncoding = { "utf-16" }
+      -- Включаем semantic tokens для богатой подсветки C/C++
+      clangd_capabilities.textDocument.semanticTokens = {
+        dynamicRegistration = false,
+        requests = {
+          range = false,
+          full = { delta = true },
+        },
+        tokenTypes = {
+          "namespace", "type", "class", "enum", "interface",
+          "struct", "typeParameter", "parameter", "variable",
+          "property", "enumMember", "event", "function", "method",
+          "macro", "keyword", "modifier", "comment", "string",
+          "number", "regexp", "operator", "decorator",
+        },
+        tokenModifiers = {
+          "declaration", "definition", "readonly", "static",
+          "deprecated", "abstract", "async", "modification",
+          "documentation", "defaultLibrary",
+        },
+        formats = { "relative" },
+        overlappingTokenSupport = true,
+        multilineTokenSupport = true,
+      }
 
       -- Попробовать LLVM clangd (brew install llvm), иначе системный
       local clangd_cmd = "clangd"
