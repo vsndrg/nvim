@@ -70,6 +70,22 @@ km.set('n', 'gb', '<C-o>', opts)
 vim.keymap.set('n', '<leader>c', ':Build<CR>', opts)
 vim.keymap.set('n', '<leader>r', ':Run<CR>', opts)
 
+-- Toggle inlay hints
+km.set('n', '<leader>i', function()
+  vim.lsp.inlay_hint.enable(not vim.lsp.inlay_hint.is_enabled())
+end, { desc = 'Toggle inlay hints' })
+
+-- Markview bindings (only for markdown files)
+vim.api.nvim_create_autocmd("FileType", {
+  pattern = "markdown",
+  callback = function()
+    local o = { noremap = true, silent = true, buffer = true }
+    km.set('n', '<leader>mp', ':Markview toggle<CR>', vim.tbl_extend('force', o, { desc = 'Markview toggle' }))
+    km.set('n', '<leader>ms', ':Markview splitToggle<CR>', vim.tbl_extend('force', o, { desc = 'Markview split' }))
+    km.set('n', '<leader>mh', ':Markview HybridToggle<CR>', vim.tbl_extend('force', o, { desc = 'Markview hybrid' }))
+  end,
+})
+
 -- Open terminal by pressing <leader>t
 vim.keymap.set('n', '<leader>t', function()
   -- Find project root (look for .root file)
