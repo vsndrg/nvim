@@ -86,19 +86,45 @@ vim.api.nvim_create_autocmd("FileType", {
   end,
 })
 
--- Open terminal by pressing <leader>t
-vim.keymap.set('n', '<leader>t', function()
-  -- Find project root (look for .root file)
-  local root = vim.fn.findfile('.root', vim.fn.expand('%:p:h') .. ';')
-  if root ~= '' then
-    root = vim.fn.fnamemodify(root, ':p:h')
-  else
-    root = vim.fn.getcwd()
+-- Terminal mode: Esc → normal mode, C-h/j/k/l → navigate windows
+km.set('t', '<Esc>',   '<C-\\><C-n>',          { noremap = true, silent = true })
+km.set('t', '<C-h>',   '<C-\\><C-n><C-w>h',    { noremap = true, silent = true })
+km.set('t', '<C-j>',   '<C-\\><C-n><C-w>j',    { noremap = true, silent = true })
+km.set('t', '<C-k>',   '<C-\\><C-n><C-w>k',    { noremap = true, silent = true })
+km.set('t', '<C-l>',   '<C-\\><C-n><C-w>l',    { noremap = true, silent = true })
+
+-- Toggle terminal (persistent buffer)
+local term_buf = nil
+local term_win = nil
+
+local function toggle_terminal()
+  -- Если окно открыто — скрыть
+  if term_win and vim.api.nvim_win_is_valid(term_win) then
+    vim.api.nvim_win_close(term_win, false)
+    term_win = nil
+    return
   end
-  -- change Neovim's working directory
-  vim.cmd('lcd ' .. root)
-  -- open a terminal
-  vim.cmd('belowright split | terminal')
+
+  -- Открыть сплит на треть высоты экрана
+  local height = math.floor(vim.o.lines / 4)
+  vim.cmd('belowright ' .. height .. 'split')
+  term_win = vim.api.nvim_get_current_win()
+
+  -- Если буфер терминала жив — показать его
+  if term_buf and vim.api.nvim_buf_is_valid(term_buf) then
+    vim.api.nvim_win_set_buf(term_win, term_buf)
+  else
+    -- Создать новый терминал в cwd
+    vim.cmd('terminal')
+    term_buf = vim.api.nvim_get_current_buf()
+    vim.bo[term_buf].buflisted = false
+  end
+
   vim.cmd('startinsert')
-end, { desc = 'Open terminal in project root' })
+end
+
+vim.keymap.set('n', '<leader>t', toggle_terminal, { desc = 'Toggle terminal' })
+vim.keymap.set('n', '<C-t>', toggle_terminal, { desc = 'Toggle terminal' })
+vim.keymap.set('i', '<C-t>', toggle_terminal, { desc = 'Toggle terminal' })
+vim.keymap.set('t', '<C-t>', toggle_terminal, { desc = 'Toggle terminal' })
 

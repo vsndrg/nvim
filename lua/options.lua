@@ -17,6 +17,7 @@ vim.o.smartcase = true
 vim.g.mapleader = " "
 
 vim.o.winborder = 'rounded'
+vim.o.guicursor = 'n-v-c-sm:block,i-ci-ve:ver25,r-cr-o:hor20,t:ver25'
 
 vim.g.neovide_input_macos_option_key_is_meta = "both"
 

@@ -2,6 +2,27 @@
 -- -- Auto Commands
 -- -- ===============
 
+-- Автоудаление терминального буфера когда процесс завершился
+vim.api.nvim_create_autocmd("TermClose", {
+  callback = function(ev)
+    pcall(vim.api.nvim_buf_delete, ev.buf, { force = true })
+  end,
+})
+
+-- Убить все терминалы перед выходом, чтобы :q/:qa/:wqa не блокировались (E948 fix)
+local function kill_terminals()
+  for _, buf in ipairs(vim.api.nvim_list_bufs()) do
+    if vim.api.nvim_buf_is_valid(buf) and vim.bo[buf].buftype == "terminal" then
+      vim.fn.jobstop(vim.b[buf].terminal_job_id)
+    end
+  end
+end
+
+vim.api.nvim_create_autocmd("QuitPre", {
+  callback = kill_terminals,
+})
+
+
 vim.api.nvim_create_autocmd("FileType", {
   pattern = { "c", "cpp", "java", "rust", "systemverilog" },
   callback = function()
