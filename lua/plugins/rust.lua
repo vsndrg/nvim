@@ -19,7 +19,31 @@ return {
           )
         end
 
+        local cargo_term_buf = nil
+        local bottom_term = {
+          execute_command = function(command, args, cwd)
+            if cargo_term_buf and vim.api.nvim_buf_is_valid(cargo_term_buf) then
+              local wins = vim.fn.win_findbuf(cargo_term_buf)
+              for _, w in ipairs(wins) do
+                vim.api.nvim_win_close(w, true)
+              end
+              vim.api.nvim_buf_delete(cargo_term_buf, { force = true })
+            end
+            vim.cmd("belowright new")
+            vim.cmd("resize " .. math.floor(vim.o.lines * 0.3))
+            cargo_term_buf = vim.api.nvim_get_current_buf()
+            local cmd_parts = { command }
+            vim.list_extend(cmd_parts, args)
+            vim.fn.termopen(cmd_parts, { cwd = cwd })
+          end,
+        }
+
         return {
+          tools = {
+            executor = bottom_term,
+            test_executor = bottom_term,
+            crate_test_executor = bottom_term,
+          },
           server = {
             capabilities = capabilities,
             default_settings = {

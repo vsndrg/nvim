@@ -1,0 +1,996 @@
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml" lang="" xml:lang="">
+<head>
+  <meta charset="utf-8" />
+  <meta name="generator" content="pandoc" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes" />
+  <title>Neovim Keybindings</title>
+  <style>
+    /* Default styles provided by pandoc.
+    ** See https://pandoc.org/MANUAL.html#variables-for-html for config info.
+    */
+    html {
+      color: #1a1a1a;
+      background-color: #fdfdfd;
+    }
+    body {
+      margin: 0 auto;
+      max-width: 36em;
+      padding-left: 50px;
+      padding-right: 50px;
+      padding-top: 50px;
+      padding-bottom: 50px;
+      hyphens: auto;
+      overflow-wrap: break-word;
+      text-rendering: optimizeLegibility;
+      font-kerning: normal;
+    }
+    @media (max-width: 600px) {
+      body {
+        font-size: 0.9em;
+        padding: 12px;
+      }
+      h1 {
+        font-size: 1.8em;
+      }
+    }
+    @media print {
+      html {
+        background-color: white;
+      }
+      body {
+        background-color: transparent;
+        color: black;
+        font-size: 12pt;
+      }
+      p, h2, h3 {
+        orphans: 3;
+        widows: 3;
+      }
+      h2, h3, h4 {
+        page-break-after: avoid;
+      }
+    }
+    p {
+      margin: 1em 0;
+    }
+    a {
+      color: #1a1a1a;
+    }
+    a:visited {
+      color: #1a1a1a;
+    }
+    img {
+      max-width: 100%;
+    }
+    svg {
+      height: auto;
+      max-width: 100%;
+    }
+    h1, h2, h3, h4, h5, h6 {
+      margin-top: 1.4em;
+    }
+    h5, h6 {
+      font-size: 1em;
+      font-style: italic;
+    }
+    h6 {
+      font-weight: normal;
+    }
+    ol, ul {
+      padding-left: 1.7em;
+      margin-top: 1em;
+    }
+    li > ol, li > ul {
+      margin-top: 0;
+    }
+    blockquote {
+      margin: 1em 0 1em 1.7em;
+      padding-left: 1em;
+      border-left: 2px solid #e6e6e6;
+      color: #606060;
+    }
+    code {
+      font-family: Menlo, Monaco, Consolas, 'Lucida Console', monospace;
+      font-size: 85%;
+      margin: 0;
+      hyphens: manual;
+    }
+    pre {
+      margin: 1em 0;
+      overflow: auto;
+    }
+    pre code {
+      padding: 0;
+      overflow: visible;
+      overflow-wrap: normal;
+    }
+    .sourceCode {
+     background-color: transparent;
+     overflow: visible;
+    }
+    hr {
+      border: none;
+      border-top: 1px solid #1a1a1a;
+      height: 1px;
+      margin: 1em 0;
+    }
+    table {
+      margin: 1em 0;
+      border-collapse: collapse;
+      width: 100%;
+      overflow-x: auto;
+      display: block;
+      font-variant-numeric: lining-nums tabular-nums;
+    }
+    table caption {
+      margin-bottom: 0.75em;
+    }
+    tbody {
+      margin-top: 0.5em;
+      border-top: 1px solid #1a1a1a;
+      border-bottom: 1px solid #1a1a1a;
+    }
+    th {
+      border-top: 1px solid #1a1a1a;
+      padding: 0.25em 0.5em 0.25em 0.5em;
+    }
+    td {
+      padding: 0.125em 0.5em 0.25em 0.5em;
+    }
+    header {
+      margin-bottom: 4em;
+      text-align: center;
+    }
+    #TOC li {
+      list-style: none;
+    }
+    #TOC ul {
+      padding-left: 1.3em;
+    }
+    #TOC > ul {
+      padding-left: 0;
+    }
+    #TOC a:not(:hover) {
+      text-decoration: none;
+    }
+    code{white-space: pre-wrap;}
+    span.smallcaps{font-variant: small-caps;}
+    div.columns{display: flex; gap: min(4vw, 1.5em);}
+    div.column{flex: auto; overflow-x: auto;}
+    div.hanging-indent{margin-left: 1.5em; text-indent: -1.5em;}
+    /* The extra [class] is a hack that increases specificity enough to
+       override a similar rule in reveal.js */
+    ul.task-list[class]{list-style: none;}
+    ul.task-list li input[type="checkbox"] {
+      font-size: inherit;
+      width: 0.8em;
+      margin: 0 0.8em 0.2em -1.6em;
+      vertical-align: middle;
+    }
+    .display.math{display: block; text-align: center; margin: 0.5rem auto;}
+  </style>
+  <style>
+  body { font-family: system-ui, -apple-system, sans-serif; max-width: 900px; margin: 40px auto; padding: 0 20px; color: #1a1a2e; background: #f8f9fa; }
+  h1 { color: #2d3561; border-bottom: 3px solid #2d3561; padding-bottom: 10px; }
+  h2 { color: #2d3561; border-bottom: 1px solid #ccc; padding-bottom: 6px; margin-top: 2em; }
+  h3 { color: #444; margin-top: 1.5em; }
+  table { border-collapse: collapse; width: 100%; margin: 1em 0; }
+  th { background: #2d3561; color: white; padding: 8px 12px; text-align: left; }
+  td { padding: 7px 12px; border-bottom: 1px solid #ddd; }
+  tr:nth-child(even) { background: #eef0f8; }
+  tr:hover { background: #dde0f0; }
+  code { background: #e8e8f0; padding: 2px 6px; border-radius: 4px; font-family: "JetBrains Mono", monospace; font-size: 0.9em; }
+  hr { border: none; border-top: 1px solid #ccc; margin: 2em 0; }
+  </style>
+</head>
+<body>
+<header id="title-block-header">
+<h1 class="title">Neovim Keybindings</h1>
+</header>
+<h1 id="neovim-keybindings">Neovim Keybindings</h1>
+<p><code>&lt;leader&gt;</code> = <code>Space</code></p>
+<hr />
+<h2 id="общие">Общие</h2>
+<table>
+<thead>
+<tr>
+<th>Клавиша</th>
+<th>Действие</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>&lt;leader&gt;w</code></td>
+<td>Сохранить файл</td>
+</tr>
+<tr>
+<td><code>&lt;leader&gt;q</code></td>
+<td>Закрыть</td>
+</tr>
+<tr>
+<td><code>&lt;leader&gt;a</code></td>
+<td>Выделить всё</td>
+</tr>
+<tr>
+<td><code>&lt;leader&gt;j</code></td>
+<td>Добавить строку ниже</td>
+</tr>
+<tr>
+<td><code>&lt;leader&gt;k</code></td>
+<td>Добавить строку выше</td>
+</tr>
+<tr>
+<td><code>&lt;leader&gt;o</code></td>
+<td>Новая строка ниже, курсор туда</td>
+</tr>
+<tr>
+<td><code>&lt;leader&gt;O</code></td>
+<td>Новая строка выше, курсор туда</td>
+</tr>
+<tr>
+<td><code>&lt;leader&gt;;</code></td>
+<td>Добавить <code>;</code> в конец строки</td>
+</tr>
+<tr>
+<td><code>&lt;leader&gt;-</code></td>
+<td>Добавить пробел после курсора</td>
+</tr>
+<tr>
+<td><code>&lt;leader&gt;_</code></td>
+<td>Добавить пробел перед курсором</td>
+</tr>
+<tr>
+<td><code>&lt;leader&gt;s</code></td>
+<td>Source текущего файла</td>
+</tr>
+<tr>
+<td><code>&lt;leader&gt;&lt;CR&gt;</code></td>
+<td>Перенести остаток строки на следующую</td>
+</tr>
+<tr>
+<td><code>&lt;leader&gt;&lt;Tab&gt;</code></td>
+<td>Вставить Tab в normal mode</td>
+</tr>
+<tr>
+<td><code>&lt;leader&gt;t</code></td>
+<td>Открыть терминал внизу</td>
+</tr>
+<tr>
+<td><code>&lt;leader&gt;h</code></td>
+<td>Закрыть другие окна + открыть Vifm</td>
+</tr>
+<tr>
+<td><code>gb</code></td>
+<td>Назад (jump list)</td>
+</tr>
+<tr>
+<td><code>n</code> / <code>N</code></td>
+<td>Следующий/предыдущий результат поиска (по центру)</td>
+</tr>
+<tr>
+<td><code>*</code> / <code>#</code></td>
+<td>Поиск слова под курсором вперёд/назад (по центру)</td>
+</tr>
+<tr>
+<td><code>g*</code> / <code>g#</code></td>
+<td>Как <code>*</code>/<code>#</code>, без границ слова</td>
+</tr>
+<tr>
+<td><code>&lt;C-u&gt;</code> / <code>&lt;C-d&gt;</code></td>
+<td>Страница вверх/вниз (по центру)</td>
+</tr>
+<tr>
+<td><code>&lt;C-h/j/k/l&gt;</code></td>
+<td>Переключение между окнами</td>
+</tr>
+<tr>
+<td><code>&lt;C-S-h/l&gt;</code></td>
+<td>Уменьшить/увеличить ширину окна</td>
+</tr>
+<tr>
+<td><code>&lt;C-S-j/k&gt;</code></td>
+<td>Уменьшить/увеличить высоту окна</td>
+</tr>
+<tr>
+<td><code>&lt;M-k&gt;</code> / <code>&lt;M-j&gt;</code></td>
+<td>Переместить строку вверх/вниз</td>
+</tr>
+</tbody>
+</table>
+<h3 id="visual-mode">Visual mode</h3>
+<table>
+<thead>
+<tr>
+<th>Клавиша</th>
+<th>Действие</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>&lt;M-k&gt;</code> / <code>&lt;M-j&gt;</code></td>
+<td>Переместить выделенные строки вверх/вниз</td>
+</tr>
+<tr>
+<td><code>p</code></td>
+<td>Вставить без перезаписи регистра</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="telescope">Telescope</h2>
+<table>
+<thead>
+<tr>
+<th>Клавиша</th>
+<th>Действие</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>&lt;leader&gt;f</code></td>
+<td>Поиск файлов</td>
+</tr>
+<tr>
+<td><code>&lt;leader&gt;l</code></td>
+<td>Live grep</td>
+</tr>
+<tr>
+<td><code>&lt;leader&gt;s</code></td>
+<td>LSP символы документа</td>
+</tr>
+<tr>
+<td><code>&lt;leader&gt;b</code></td>
+<td>Недавние файлы</td>
+</tr>
+<tr>
+<td><code>&lt;C-b&gt;</code></td>
+<td>Предыдущий буфер</td>
+</tr>
+<tr>
+<td><code>l</code> <em>(в telescope)</em></td>
+<td>Открыть выбранное</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="lsp">LSP</h2>
+<table>
+<thead>
+<tr>
+<th>Клавиша</th>
+<th>Действие</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>K</code></td>
+<td>Hover документация</td>
+</tr>
+<tr>
+<td><code>gd</code></td>
+<td>Перейти к определению</td>
+</tr>
+<tr>
+<td><code>gr</code></td>
+<td>Показать ссылки</td>
+</tr>
+<tr>
+<td><code>rn</code></td>
+<td>Переименовать символ</td>
+</tr>
+<tr>
+<td><code>&lt;leader&gt;ca</code></td>
+<td>Code action</td>
+</tr>
+<tr>
+<td><code>gl</code></td>
+<td>Показать диагностику (float)</td>
+</tr>
+<tr>
+<td><code>[d</code> / <code>]d</code></td>
+<td>Предыдущая/следующая диагностика</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="отладка-dap">Отладка (DAP)</h2>
+<table>
+<thead>
+<tr>
+<th>Клавиша</th>
+<th>Действие</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>&lt;Leader&gt;db</code></td>
+<td>Поставить/убрать breakpoint</td>
+</tr>
+<tr>
+<td><code>&lt;Leader&gt;dc</code></td>
+<td>Продолжить</td>
+</tr>
+<tr>
+<td><code>&lt;Leader&gt;dr</code></td>
+<td>Запустить до курсора</td>
+</tr>
+<tr>
+<td><code>&lt;Leader&gt;di</code></td>
+<td>Шаг внутрь</td>
+</tr>
+<tr>
+<td><code>&lt;Leader&gt;do</code></td>
+<td>Шаг через</td>
+</tr>
+<tr>
+<td><code>&lt;Leader&gt;dO</code></td>
+<td>Шаг из</td>
+</tr>
+<tr>
+<td><code>&lt;Leader&gt;dl</code></td>
+<td>Повторить последний запуск</td>
+</tr>
+<tr>
+<td><code>&lt;Leader&gt;dw</code></td>
+<td>Добавить слово под курсором в watches</td>
+</tr>
+<tr>
+<td><code>&lt;Leader&gt;dq</code></td>
+<td>Завершить отладку</td>
+</tr>
+<tr>
+<td><code>&lt;A-l&gt;</code></td>
+<td>Шаг внутрь <em>(альт.)</em></td>
+</tr>
+<tr>
+<td><code>&lt;A-j&gt;</code></td>
+<td>Шаг через <em>(альт.)</em></td>
+</tr>
+<tr>
+<td><code>&lt;A-h&gt;</code></td>
+<td>Шаг из <em>(альт.)</em></td>
+</tr>
+<tr>
+<td><code>&lt;A-k&gt;</code></td>
+<td>Повторить последний запуск <em>(альт.)</em></td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="completion-insertselect">Completion
+<em>(insert/select)</em></h2>
+<table>
+<thead>
+<tr>
+<th>Клавиша</th>
+<th>Действие</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>&lt;A-Space&gt;</code></td>
+<td>Вызвать completion вручную</td>
+</tr>
+<tr>
+<td><code>&lt;A-j&gt;</code> / <code>&lt;Down&gt;</code></td>
+<td>Следующий вариант</td>
+</tr>
+<tr>
+<td><code>&lt;A-k&gt;</code> / <code>&lt;Up&gt;</code></td>
+<td>Предыдущий вариант</td>
+</tr>
+<tr>
+<td><code>&lt;A-l&gt;</code></td>
+<td>Подтвердить / вызвать completion</td>
+</tr>
+<tr>
+<td><code>&lt;A-h&gt;</code></td>
+<td>Отменить completion</td>
+</tr>
+<tr>
+<td><code>&lt;Tab&gt;</code></td>
+<td>Подтвердить / прыжок по снипету</td>
+</tr>
+<tr>
+<td><code>&lt;S-Tab&gt;</code></td>
+<td>Предыдущий вариант / прыжок назад</td>
+</tr>
+<tr>
+<td><code>&lt;CR&gt;</code></td>
+<td>Подтвердить</td>
+</tr>
+<tr>
+<td><code>&lt;Esc&gt;</code></td>
+<td>Закрыть popup, выйти из insert</td>
+</tr>
+<tr>
+<td><code>&lt;C-b&gt;</code> / <code>&lt;C-f&gt;</code></td>
+<td>Прокрутить документацию</td>
+</tr>
+<tr>
+<td><code>&lt;C-l&gt;</code></td>
+<td>Принять одну строку Copilot</td>
+</tr>
+<tr>
+<td><code>&lt;leader&gt;cp</code></td>
+<td>Включить/выключить Copilot</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="flash-прыжки">Flash <em>(прыжки)</em></h2>
+<table>
+<thead>
+<tr>
+<th>Клавиша</th>
+<th>Режим</th>
+<th>Действие</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>s</code></td>
+<td>n, x, o</td>
+<td>Прыжок по символам</td>
+</tr>
+<tr>
+<td><code>S</code></td>
+<td>n, x, o</td>
+<td>Прыжок по treesitter</td>
+</tr>
+<tr>
+<td><code>r</code></td>
+<td>o</td>
+<td>Remote flash</td>
+</tr>
+<tr>
+<td><code>R</code></td>
+<td>o, x</td>
+<td>Treesitter search</td>
+</tr>
+<tr>
+<td><code>&lt;C-s&gt;</code></td>
+<td>c</td>
+<td>Переключить flash search</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="git">Git</h2>
+<table>
+<thead>
+<tr>
+<th>Клавиша</th>
+<th>Действие</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>&lt;leader&gt;gp</code></td>
+<td>Превью hunk</td>
+</tr>
+<tr>
+<td><code>&lt;leader&gt;gt</code></td>
+<td>Переключить blame строки</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="neo-tree">Neo-tree</h2>
+<table>
+<thead>
+<tr>
+<th>Клавиша</th>
+<th>Действие</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>&lt;leader&gt;n</code></td>
+<td>Открыть/закрыть файловое дерево</td>
+</tr>
+<tr>
+<td><code>l</code> <em>(в дереве)</em></td>
+<td>Открыть узел</td>
+</tr>
+<tr>
+<td><code>L</code> <em>(в дереве)</em></td>
+<td>Открыть в вертикальном сплите</td>
+</tr>
+<tr>
+<td><code>&lt;A-l&gt;</code> <em>(в дереве)</em></td>
+<td>Открыть в горизонтальном сплите</td>
+</tr>
+<tr>
+<td><code>h</code> <em>(в дереве)</em></td>
+<td>Свернуть узел</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="yazi">Yazi</h2>
+<table>
+<thead>
+<tr>
+<th>Клавиша</th>
+<th>Действие</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>&lt;leader&gt;-</code></td>
+<td>Открыть yazi у текущего файла</td>
+</tr>
+<tr>
+<td><code>&lt;leader&gt;cw</code></td>
+<td>Открыть yazi в рабочей директории</td>
+</tr>
+<tr>
+<td><code>&lt;C-Up&gt;</code></td>
+<td>Возобновить последнюю сессию yazi</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="hex">Hex</h2>
+<table>
+<thead>
+<tr>
+<th>Клавиша</th>
+<th>Действие</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>&lt;leader&gt;hx</code></td>
+<td>Переключить hex view</td>
+</tr>
+<tr>
+<td><code>&lt;leader&gt;hd</code></td>
+<td>Hex dump</td>
+</tr>
+<tr>
+<td><code>&lt;leader&gt;ha</code></td>
+<td>Hex assemble (сохранить)</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="сессии-прочее">Сессии / прочее</h2>
+<table>
+<thead>
+<tr>
+<th>Клавиша</th>
+<th>Действие</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>&lt;leader&gt;z</code></td>
+<td>Поиск сессий (AutoSession)</td>
+</tr>
+<tr>
+<td><code>&lt;leader&gt;m</code></td>
+<td>Скрыть уведомления (Noice)</td>
+</tr>
+<tr>
+<td><code>&lt;leader&gt;c</code></td>
+<td>Собрать проект</td>
+</tr>
+<tr>
+<td><code>&lt;leader&gt;r</code></td>
+<td>Запустить проект</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="rust-только-.rs">Rust <em>(только .rs)</em></h2>
+<table>
+<thead>
+<tr>
+<th>Клавиша</th>
+<th>Действие</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>K</code></td>
+<td>Rust hover actions</td>
+</tr>
+<tr>
+<td><code>&lt;leader&gt;ca</code></td>
+<td>Rust code action</td>
+</tr>
+<tr>
+<td><code>&lt;leader&gt;rr</code></td>
+<td>Runnables</td>
+</tr>
+<tr>
+<td><code>&lt;leader&gt;rd</code></td>
+<td>Debuggables</td>
+</tr>
+<tr>
+<td><code>&lt;leader&gt;rt</code></td>
+<td>Testables</td>
+</tr>
+<tr>
+<td><code>&lt;leader&gt;rc</code></td>
+<td>Открыть Cargo.toml</td>
+</tr>
+<tr>
+<td><code>&lt;leader&gt;rp</code></td>
+<td>Родительский модуль</td>
+</tr>
+<tr>
+<td><code>&lt;leader&gt;ro</code></td>
+<td>Открыть docs.rs</td>
+</tr>
+<tr>
+<td><code>&lt;leader&gt;re</code></td>
+<td>Объяснить ошибку</td>
+</tr>
+<tr>
+<td><code>&lt;leader&gt;rD</code></td>
+<td>Render диагностики</td>
+</tr>
+<tr>
+<td><code>&lt;leader&gt;rm</code></td>
+<td>Развернуть макрос</td>
+</tr>
+<tr>
+<td><code>&lt;leader&gt;rH</code></td>
+<td>Переключить inlay hints</td>
+</tr>
+<tr>
+<td><code>&lt;leader&gt;rf</code></td>
+<td>Форматировать (rustfmt)</td>
+</tr>
+<tr>
+<td><code>J</code></td>
+<td>Умное объединение строк</td>
+</tr>
+</tbody>
+</table>
+<h3 id="cargo.toml">Cargo.toml</h3>
+<table>
+<thead>
+<tr>
+<th>Клавиша</th>
+<th>Действие</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>&lt;leader&gt;ci</code></td>
+<td>Инфо о крейте</td>
+</tr>
+<tr>
+<td><code>&lt;leader&gt;cv</code></td>
+<td>Версии крейта</td>
+</tr>
+<tr>
+<td><code>&lt;leader&gt;cf</code></td>
+<td>Фичи крейта</td>
+</tr>
+<tr>
+<td><code>&lt;leader&gt;cd</code></td>
+<td>Зависимости крейта</td>
+</tr>
+<tr>
+<td><code>&lt;leader&gt;cu</code></td>
+<td>Обновить крейт</td>
+</tr>
+<tr>
+<td><code>&lt;leader&gt;cU</code></td>
+<td>Обновить все крейты</td>
+</tr>
+<tr>
+<td><code>&lt;leader&gt;cA</code></td>
+<td>Апгрейд всех до latest</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="c-только-.c">C <em>(только .c)</em></h2>
+<table>
+<thead>
+<tr>
+<th>Клавиша</th>
+<th>Действие</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>&lt;leader&gt;ch</code> / <code>&lt;F4&gt;</code></td>
+<td>Переключить .h ↔︎ .c</td>
+</tr>
+<tr>
+<td><code>&lt;leader&gt;ci</code></td>
+<td>Инфо о символе</td>
+</tr>
+<tr>
+<td><code>&lt;leader&gt;ct</code></td>
+<td>Иерархия типов</td>
+</tr>
+<tr>
+<td><code>&lt;leader&gt;cH</code></td>
+<td>Переключить inlay hints</td>
+</tr>
+<tr>
+<td><code>&lt;leader&gt;cf</code></td>
+<td>Форматировать</td>
+</tr>
+<tr>
+<td><code>&lt;leader&gt;cc</code></td>
+<td>Синтаксическая проверка (gcc)</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="c-только-.cpp">C++ <em>(только .cpp)</em></h2>
+<table>
+<thead>
+<tr>
+<th>Клавиша</th>
+<th>Действие</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>&lt;leader&gt;ch</code> / <code>&lt;F4&gt;</code></td>
+<td>Переключить .h ↔︎ .cpp</td>
+</tr>
+<tr>
+<td><code>&lt;leader&gt;ci</code></td>
+<td>Инфо о символе</td>
+</tr>
+<tr>
+<td><code>&lt;leader&gt;ct</code></td>
+<td>Иерархия типов</td>
+</tr>
+<tr>
+<td><code>&lt;leader&gt;cA</code></td>
+<td>Показать AST</td>
+</tr>
+<tr>
+<td><code>&lt;leader&gt;cm</code></td>
+<td>Использование памяти clangd</td>
+</tr>
+<tr>
+<td><code>&lt;leader&gt;cH</code></td>
+<td>Переключить inlay hints</td>
+</tr>
+<tr>
+<td><code>&lt;leader&gt;cf</code></td>
+<td>Форматировать</td>
+</tr>
+<tr>
+<td><code>&lt;leader&gt;cc</code></td>
+<td>Синтаксическая проверка (g++)</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="java-только-.java">Java <em>(только .java)</em></h2>
+<table>
+<thead>
+<tr>
+<th>Клавиша</th>
+<th>Режим</th>
+<th>Действие</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>&lt;leader&gt;ev</code></td>
+<td>n / v</td>
+<td>Извлечь переменную</td>
+</tr>
+<tr>
+<td><code>&lt;leader&gt;ec</code></td>
+<td>n / v</td>
+<td>Извлечь константу</td>
+</tr>
+<tr>
+<td><code>&lt;leader&gt;em</code></td>
+<td>v</td>
+<td>Извлечь метод</td>
+</tr>
+<tr>
+<td><code>&lt;leader&gt;ei</code></td>
+<td>n</td>
+<td>Инлайн переменной/метода</td>
+</tr>
+<tr>
+<td><code>&lt;leader&gt;io</code></td>
+<td>n</td>
+<td>Организовать импорты</td>
+</tr>
+<tr>
+<td><code>gI</code></td>
+<td>n</td>
+<td>Перейти к реализациям</td>
+</tr>
+<tr>
+<td><code>gS</code></td>
+<td>n</td>
+<td>Перейти к super</td>
+</tr>
+<tr>
+<td><code>gH</code></td>
+<td>n</td>
+<td>Иерархия типов</td>
+</tr>
+<tr>
+<td><code>&lt;leader&gt;gc</code></td>
+<td>n</td>
+<td>Сгенерировать код</td>
+</tr>
+<tr>
+<td><code>&lt;leader&gt;ut</code></td>
+<td>n</td>
+<td>Запустить ближайший тест</td>
+</tr>
+<tr>
+<td><code>&lt;leader&gt;uT</code></td>
+<td>n</td>
+<td>Запустить все тесты класса</td>
+</tr>
+<tr>
+<td><code>&lt;leader&gt;up</code></td>
+<td>n</td>
+<td>Выбрать тест</td>
+</tr>
+<tr>
+<td><code>&lt;leader&gt;ud</code></td>
+<td>n</td>
+<td>Отладить тест</td>
+</tr>
+<tr>
+<td><code>&lt;leader&gt;pu</code></td>
+<td>n</td>
+<td>Обновить конфиг проекта</td>
+</tr>
+<tr>
+<td><code>&lt;leader&gt;cc</code></td>
+<td>n</td>
+<td>Новый Java class</td>
+</tr>
+<tr>
+<td><code>&lt;leader&gt;ci</code></td>
+<td>n</td>
+<td>Новый Java interface</td>
+</tr>
+<tr>
+<td><code>&lt;leader&gt;ce</code></td>
+<td>n</td>
+<td>Новый Java enum</td>
+</tr>
+<tr>
+<td><code>&lt;leader&gt;cr</code></td>
+<td>n</td>
+<td>Новый Java record</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="neovide-только-gui">Neovide <em>(только GUI)</em></h2>
+<table>
+<thead>
+<tr>
+<th>Клавиша</th>
+<th>Режим</th>
+<th>Действие</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>&lt;D-v&gt;</code></td>
+<td>c, i, t</td>
+<td>Вставить из буфера обмена</td>
+</tr>
+</tbody>
+</table>
+</body>
+</html>
