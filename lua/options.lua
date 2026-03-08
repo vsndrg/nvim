@@ -21,8 +21,12 @@ vim.o.guicursor = 'n-v-c-sm:block,i-ci-ve:ver25,r-cr-o:hor20,t:ver25'
 
 vim.g.neovide_input_macos_option_key_is_meta = "both"
 
--- Fix paste in Neovide for terminal, command-line, search
 if vim.g.neovide then
+  vim.g.neovide_refresh_rate = 120
+  -- vim.g.neovide_opacity = 0.9
+  -- vim.g.neovide_cursor_animation_length = 0.08
+  -- vim.g.neovide_scroll_animation_length = 0.2
+  -- vim.g.neovide_cursor_trail_size = 0.5
   vim.keymap.set('c', '<D-v>', '<C-R>+', { noremap = true })
   vim.keymap.set('i', '<D-v>', '<C-R>+', { noremap = true })
   vim.keymap.set('t', '<D-v>', '<C-\\><C-n>"+pi', { noremap = true })
