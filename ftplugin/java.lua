@@ -96,6 +96,14 @@ local config = {
           staticStarThreshold = 9999,
         },
       },
+      format = {
+        enabled = true,
+        settings = {
+          -- Most popular Java style profile (Google Java Style)
+          url = "https://raw.githubusercontent.com/google/styleguide/gh-pages/eclipse-java-google-style.xml",
+          profile = "GoogleStyle",
+        },
+      },
       -- Code generation settings (like IntelliJ)
       codeGeneration = {
         toString = {
@@ -134,6 +142,15 @@ jdtls.start_or_attach(config)
 -- These only work in Java buffers (buffer = true)
 ------------------------------------------------------------------------------
 local opts = { buffer = true, silent = true }
+
+-- Format file/selection (Google Java Style via jdtls)
+vim.keymap.set("n", "<leader>jf", function()
+  vim.lsp.buf.format({ async = true })
+end, vim.tbl_extend("force", opts, { desc = "Format file" }))
+
+vim.keymap.set("v", "<leader>jf", function()
+  vim.lsp.buf.format({ async = true })
+end, vim.tbl_extend("force", opts, { desc = "Format selection" }))
 
 -- ═══════════════════════════════════════════════════════════════════════════
 -- EXTRACT/REFACTOR (<leader>e...)
@@ -377,4 +394,3 @@ end, vim.tbl_extend("force", opts, { desc = "New Java record" }))
 --   end,
 --   condition = { filetype = { "java" } },
 -- })
-
