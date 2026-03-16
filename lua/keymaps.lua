@@ -106,7 +106,7 @@ local function toggle_terminal()
   end
 
   -- Открыть сплит на треть высоты экрана
-  local height = math.floor(vim.o.lines / 4)
+  local height = math.floor(vim.o.lines / 2)
   vim.cmd('belowright ' .. height .. 'split')
   term_win = vim.api.nvim_get_current_win()
 
@@ -124,7 +124,27 @@ local function toggle_terminal()
 end
 
 vim.keymap.set('n', '<leader>t', toggle_terminal, { desc = 'Toggle terminal' })
-vim.keymap.set('n', '<C-t>', toggle_terminal, { desc = 'Toggle terminal' })
-vim.keymap.set('i', '<C-t>', toggle_terminal, { desc = 'Toggle terminal' })
-vim.keymap.set('t', '<C-t>', toggle_terminal, { desc = 'Toggle terminal' })
+vim.keymap.set('n', '<C-Space>', toggle_terminal, { desc = 'Toggle terminal' })
+vim.keymap.set('i', '<C-Space>', toggle_terminal, { desc = 'Toggle terminal' })
+vim.keymap.set('t', '<C-Space>', toggle_terminal, { desc = 'Toggle terminal' })
 
+-- Some terminals send <C-Space> as <C-@>
+vim.keymap.set('n', '<C-@>', toggle_terminal, { desc = 'Toggle terminal' })
+vim.keymap.set('i', '<C-@>', toggle_terminal, { desc = 'Toggle terminal' })
+vim.keymap.set('t', '<C-@>', toggle_terminal, { desc = 'Toggle terminal' })
+
+local function open_symbol_picker()
+  local ok, builtin = pcall(require, 'telescope.builtin')
+  if ok then
+    local ok_symbols = pcall(builtin.symbols, {
+      sources = { 'emoji', 'kaomoji', 'gitmoji', 'math', 'latex' },
+    })
+    if ok_symbols then
+      return
+    end
+  end
+
+  vim.notify('Symbols picker is unavailable. Run :Lazy sync and restart Neovim.', vim.log.levels.WARN)
+end
+
+vim.keymap.set({ 'n', 'i', 't' }, '<C-D-Space>', open_symbol_picker, { desc = 'Open symbols picker' })

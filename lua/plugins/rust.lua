@@ -61,9 +61,9 @@ return {
                   enable = true,
                 },
                 inlayHints = {
-                  chainingHints = { enable = true },
-                  typeHints = { enable = true },
-                  parameterHints = { enable = true },
+                  chainingHints = { enable = false },
+                  typeHints = { enable = false },
+                  parameterHints = { enable = false },
                 },
               },
             },

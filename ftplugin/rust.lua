@@ -59,12 +59,3 @@ end, "Format file (rustfmt)")
 map("v", "<leader>rf", function()
   vim.lsp.buf.format({ async = true })
 end, "Format selection")
-
--- Enable inlay hints by default when LSP attaches
-vim.api.nvim_create_autocmd("LspAttach", {
-  buffer = 0,
-  once = true,
-  callback = function()
-    vim.lsp.inlay_hint.enable(true, { bufnr = 0 })
-  end,
-})

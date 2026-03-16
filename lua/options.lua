@@ -24,12 +24,9 @@ vim.g.neovide_input_macos_option_key_is_meta = "both"
 if vim.g.neovide then
   vim.g.neovide_refresh_rate = 120
   vim.g.neovide_scroll_animation_far_lines = 1
-  vim.g.neovide_floating_blur_amount_x = 2.0
-  vim.g.neovide_floating_blur_amount_y = 2.0
-  vim.g.neovide_floating_shadow = true
-  vim.g.neovide_floating_z_height = 10
-  vim.g.neovide_light_angle_degrees = 45
-  vim.g.neovide_light_radius = 5
+  vim.g.neovide_floating_blur_amount_x = 0.0
+  vim.g.neovide_floating_blur_amount_y = 0.0
+  vim.g.neovide_floating_shadow = false
   -- vim.g.neovide_opacity = 0.9
   -- vim.g.neovide_cursor_animation_length = 0.08
   -- vim.g.neovide_scroll_animation_length = 0.2

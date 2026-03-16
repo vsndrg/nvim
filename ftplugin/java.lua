@@ -116,7 +116,7 @@ local config = {
       autobuild = { enabled = true },
       -- Inlay hints (parameter names, like IntelliJ)
       inlayHints = {
-        parameterNames = { enabled = "all" },
+        parameterNames = { enabled = "none" },
       },
     },
   },
@@ -377,5 +377,4 @@ end, vim.tbl_extend("force", opts, { desc = "New Java record" }))
 --   end,
 --   condition = { filetype = { "java" } },
 -- })
-
 
