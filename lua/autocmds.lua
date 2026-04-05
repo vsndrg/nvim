@@ -2,7 +2,6 @@
 -- -- Auto Commands
 -- -- ===============
 
-
 -- Автоудаление терминального буфера когда процесс завершился
 vim.api.nvim_create_autocmd("TermClose", {
   callback = function(ev)
