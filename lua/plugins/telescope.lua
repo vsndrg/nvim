@@ -13,7 +13,7 @@ return {
       vim.keymap.set('n', '<leader>b', function()
         builtin.oldfiles({ initial_mode = "normal" })
       end, {})
-      vim.keymap.set('n', '<C-b>', function()
+      vim.keymap.set({ 'n', 'i' }, '<C-b>', function()
         vim.cmd('edit #')
       end, {})
 

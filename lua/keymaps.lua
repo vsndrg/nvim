@@ -6,7 +6,7 @@ local opts = { noremap = true, silent = true }
 local km = vim.keymap
 
 -- Save file command
-km.set("n", "<leader>w", ":w<CR>", opts)
+km.set("n", "<leader>w", "<cmd>silent update<CR>", opts)
 km.set("n", "<leader>q", ":q<CR>", opts)
 
 km.set("n", "<leader>a", "ggVG", opts)

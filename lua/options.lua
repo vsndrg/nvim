@@ -2,6 +2,7 @@ vim.opt.clipboard:append("unnamedplus")
 vim.opt.guifont = { "JetBrainsMono Nerd Font", ":h14" }
 
 vim.opt.pumheight = 12
+vim.opt.shortmess:append("F")
 
 vim.o.number = true
 vim.o.relativenumber = true

@@ -3,7 +3,7 @@ return {
     "jay-babu/mason-nvim-dap.nvim",
     lazy = false,
     opts = {
-      ensure_installed = { "codelldb", "javadbg", "javatest" },
+      ensure_installed = { "codelldb", "javadbg", "javatest", "js-debug-adapter" },
       automatic_installation = true,
     }
   },
@@ -172,6 +172,45 @@ return {
       local function get_project_name()
         return uv.fs_realpath(vim.fn.getcwd()):match("^.+/(.+)$")
       end
+
+      -- JavaScript / TypeScript (Node.js)
+      -- Адаптер "pwa-node" — это Node.js (не браузер).
+      -- Браузер был бы "pwa-chrome", которого здесь нет.
+      dap.adapters["pwa-node"] = {
+        type = "server",
+        host = "localhost",
+        port = "${port}",
+        executable = {
+          command = "node",
+          args = {
+            vim.fn.stdpath("data") .. "/mason/packages/js-debug-adapter/js-debug/src/dapDebugServer.js",
+            "${port}",
+          },
+        },
+      }
+
+      local js_config = {
+        {
+          name = "Launch (Node.js)",
+          type = "pwa-node",
+          request = "launch",
+          program = "${file}",
+          cwd = "${workspaceFolder}",
+          console = "integratedTerminal",
+          stopOnEntry = false,
+        },
+        {
+          name = "Attach to process (Node.js)",
+          type = "pwa-node",
+          request = "attach",
+          processId = function()
+            return require("dap.utils").pick_process()
+          end,
+          cwd = "${workspaceFolder}",
+        },
+      }
+      dap.configurations.javascript = js_config
+      dap.configurations.typescript = js_config
 
       dap.configurations.java = {
         {

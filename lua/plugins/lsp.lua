@@ -21,6 +21,8 @@ return {
         "pyright",
         -- "svls",
         "verible",
+        "ts_ls",
+        "eslint",
       }
     }
   },
@@ -46,6 +48,28 @@ return {
       })
 
       local util = require("lspconfig.util")
+
+      local function get_python_path(workspace)
+        if vim.env.VIRTUAL_ENV then
+          local active_venv_python = vim.fs.joinpath(vim.env.VIRTUAL_ENV, "bin", "python")
+          if vim.fn.executable(active_venv_python) == 1 then
+            return active_venv_python
+          end
+        end
+
+        for _, venv_dir in ipairs({ ".venv", "venv", "env" }) do
+          local python = vim.fs.joinpath(workspace, venv_dir, "bin", "python")
+          if vim.fn.executable(python) == 1 then
+            return python
+          end
+        end
+
+        if vim.fn.executable("python3") == 1 then
+          return vim.fn.exepath("python3")
+        end
+
+        return vim.fn.exepath("python")
+      end
 
       lspconfig.lua_ls.setup({
         capabilities = capabilities,
@@ -147,6 +171,13 @@ return {
       -- })
       lspconfig.pyright.setup{
         capabilities = capabilities,
+        root_markers = { "pyproject.toml", "setup.py", "setup.cfg", "requirements.txt", "Pipfile", "pyrightconfig.json", ".git" },
+        before_init = function(_, config)
+          local workspace = config.root_dir or vim.fn.getcwd()
+          config.settings = config.settings or {}
+          config.settings.python = config.settings.python or {}
+          config.settings.python.pythonPath = get_python_path(workspace)
+        end,
         settings = {
           python = {
             analysis = {
@@ -157,6 +188,21 @@ return {
           }
         }
       }
+
+      lspconfig.ts_ls.setup({
+        capabilities = capabilities,
+        root_markers = { "package.json", "tsconfig.json", "jsconfig.json", ".git" },
+        settings = {
+          typescript = { inlayHints = { includeInlayParameterNameHints = "none" } },
+          javascript = { inlayHints = { includeInlayParameterNameHints = "none" } },
+        },
+      })
+
+      lspconfig.eslint.setup({
+        capabilities = capabilities,
+        root_markers = { "package.json", ".eslintrc.js", ".eslintrc.cjs", ".eslintrc.json", ".eslintrc.yml", "eslint.config.js", "eslint.config.mjs", ".git" },
+        settings = { format = { enable = false } },
+      })
 
       -- rust_analyzer managed by rustaceanvim (lua/plugins/rust.lua)
 
@@ -196,4 +242,3 @@ return {
     end
   }
 }
-
