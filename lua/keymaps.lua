@@ -97,12 +97,31 @@ km.set('t', '<C-l>',   '<C-\\><C-n><C-w>l',    { noremap = true, silent = true }
 local term_buf = nil
 local term_win = nil
 
+local function sync_terminal_state()
+  vim.g.persistent_term_buf = term_buf or 0
+  vim.g.persistent_term_win = term_win or 0
+end
+
+sync_terminal_state()
+
 local function toggle_terminal()
   -- Если окно открыто — скрыть
   if term_win and vim.api.nvim_win_is_valid(term_win) then
     vim.api.nvim_win_close(term_win, false)
     term_win = nil
+    sync_terminal_state()
     return
+  end
+
+  if term_buf and vim.api.nvim_buf_is_valid(term_buf) then
+    local wins = vim.fn.win_findbuf(term_buf)
+    if #wins > 0 and vim.api.nvim_win_is_valid(wins[1]) then
+      term_win = wins[1]
+      vim.api.nvim_set_current_win(term_win)
+      sync_terminal_state()
+      vim.cmd('startinsert')
+      return
+    end
   end
 
   -- Открыть сплит на треть высоты экрана
@@ -120,8 +139,11 @@ local function toggle_terminal()
     vim.bo[term_buf].buflisted = false
   end
 
+  sync_terminal_state()
   vim.cmd('startinsert')
 end
+
+_G.toggle_persistent_terminal = toggle_terminal
 
 vim.keymap.set('n', '<leader>t', toggle_terminal, { desc = 'Toggle terminal' })
 vim.keymap.set('n', '<C-Space>', toggle_terminal, { desc = 'Toggle terminal' })

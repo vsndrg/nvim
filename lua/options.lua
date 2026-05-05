@@ -15,7 +15,8 @@ vim.o.smartindent = false
 vim.o.ignorecase = true
 vim.o.smartcase = true
 
-vim.g.mapleader = " "
+vim.g.mapleader      = " "
+vim.g.maplocalleader = ","
 
 vim.o.winborder = 'rounded'
 vim.o.guicursor = 'n-v-c-sm:block,i-ci-ve:ver25,r-cr-o:hor20,t:ver25'

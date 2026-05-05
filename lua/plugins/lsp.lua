@@ -23,6 +23,7 @@ return {
         "verible",
         "ts_ls",
         "eslint",
+        "clojure-lsp",
       }
     }
   },
@@ -202,6 +203,18 @@ return {
         capabilities = capabilities,
         root_markers = { "package.json", ".eslintrc.js", ".eslintrc.cjs", ".eslintrc.json", ".eslintrc.yml", "eslint.config.js", "eslint.config.mjs", ".git" },
         settings = { format = { enable = false } },
+      })
+
+      lspconfig.clojure_lsp.setup({
+        capabilities = capabilities,
+        cmd = { "clojure-lsp" },
+        filetypes = { "clojure", "clojurescript", "edn" },
+        root_markers = { "project.clj", "deps.edn", "build.boot", "shadow-cljs.edn", ".git" },
+        settings = {
+          ["clojure-lsp"] = {
+            ["source-paths-ignore-regex"] = { "resources/.*", "target/.*" },
+          },
+        },
       })
 
       -- rust_analyzer managed by rustaceanvim (lua/plugins/rust.lua)

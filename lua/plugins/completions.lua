@@ -6,28 +6,60 @@ return {
   -- texlab LSP provides proper \alpha, \beta etc. completions
   {
     'github/copilot.vim',
+    init = function()
+      vim.g.copilot_enabled = false
+      vim.g.copilot_no_tab_map = true
+      vim.g.copilot_hide_during_completion = false
+    end,
     config = function()
       -- Toggle Copilot on/off
       vim.keymap.set('n', '<leader>cp', function()
-        if vim.b.copilot_enabled == false or vim.g.copilot_enabled == false then
+        if vim.g.copilot_enabled == false then
           vim.cmd('Copilot enable')
           vim.g.copilot_enabled = true
-          vim.b.copilot_enabled = true
           print('Copilot enabled')
         else
           vim.cmd('Copilot disable')
           vim.g.copilot_enabled = false
-          vim.b.copilot_enabled = false
           print('Copilot disabled')
         end
       end, { noremap = true, silent = true })
       
-      -- Accept only one line of Copilot suggestion
-      vim.keymap.set('i', '<C-l>', 'copilot#AcceptLine()', {
+      -- Tab: accept Copilot suggestion if enabled, otherwise handled by cmp
+      vim.keymap.set('i', '<Tab>', function()
+        local cmp = require('cmp')
+        local luasnip = require('luasnip')
+        
+        if vim.g.copilot_enabled then
+          -- Copilot enabled: accept suggestion if available
+          local suggestion = vim.fn['copilot#GetDisplayedSuggestion']()
+          if suggestion.text ~= '' then
+            return vim.fn['copilot#Accept']('')
+          end
+        end
+        
+        -- No Copilot suggestion or Copilot disabled: use cmp/snippets
+        if cmp.visible() then
+          vim.schedule(function()
+            cmp.confirm({ select = true })
+          end)
+          return ''
+        elseif luasnip.expand_or_jumpable() then
+          vim.schedule(function()
+            luasnip.expand_or_jump()
+          end)
+          return ''
+        else
+          return '\t'
+        end
+      end, {
         expr = true,
         replace_keycodes = false,
         silent = true
       })
+      
+      -- Accept one line of Copilot suggestion
+      vim.keymap.set('i', '<C-l>', '<Plug>(copilot-accept-line)', { silent = true })
     end
   },
   {
@@ -64,6 +96,9 @@ return {
       local lspkind = require("lspkind")
       local luasnip = require("luasnip")
 
+      local types = require('cmp.types')
+      local compare = cmp.config.compare
+
       cmp.setup({
         snippet = {
           expand = function(args)
@@ -77,6 +112,39 @@ return {
         completion = {
           completeopt = 'menu,menuone,noselect',
           autocomplete = { require('cmp.types').cmp.TriggerEvent.TextChanged },
+        },
+        sorting = {
+          priority_weight = 2,
+          comparators = {
+            -- 1. Exact prefix match first
+            compare.exact,
+            -- 2. Higher score (fuzzy match quality from LSP)
+            compare.score,
+            -- 3. Recently used completions
+            compare.recently_used,
+            -- 4. Nearby code locality (same scope/file)
+            compare.locality,
+            -- 5. Deprioritize Text completions
+            function(entry1, entry2)
+              local kind1 = entry1:get_kind()
+              local kind2 = entry2:get_kind()
+              local text_kind = types.lsp.CompletionItemKind.Text
+              if kind1 == text_kind and kind2 ~= text_kind then
+                return false
+              end
+              if kind1 ~= text_kind and kind2 == text_kind then
+                return true
+              end
+              return nil
+            end,
+            -- 6. Sort by completion kind
+            compare.kind,
+            -- 7. Shorter completions first
+            compare.length,
+            -- 8. Alphabetical tiebreaker
+            compare.sort_text,
+            compare.order,
+          },
         },
         formatting = {
           fields = { "kind", "abbr", "menu" },
@@ -95,31 +163,12 @@ return {
           ['<C-b>'] = cmp.mapping.scroll_docs(-4),
           ['<C-f>'] = cmp.mapping.scroll_docs(4),
           ['<A-Space>'] = cmp.mapping.complete(),
-          -- Tab: use cmp when Copilot is disabled, otherwise fall back to Copilot/default
-          ['<Tab>'] = cmp.mapping(function(fallback)
-            local copilot_off = (vim.b.copilot_enabled == false) or (vim.g.copilot_enabled == false)
-            if copilot_off then
-              if cmp.visible() then
-                cmp.confirm({ select = true })
-              elseif luasnip.expand_or_jumpable() then
-                luasnip.expand_or_jump()
-              else
-                cmp.complete()
-              end
-            else
-              fallback()
-            end
-          end, { "i", "s" }),
+          -- Tab handled by Copilot (see copilot.vim config above)
           ['<S-Tab>'] = cmp.mapping(function(fallback)
-            local copilot_off = (vim.b.copilot_enabled == false) or (vim.g.copilot_enabled == false)
-            if copilot_off then
-              if cmp.visible() then
-                cmp.select_prev_item()
-              elseif luasnip.locally_jumpable(-1) then
-                luasnip.jump(-1)
-              else
-                fallback()
-              end
+            if cmp.visible() then
+              cmp.select_prev_item()
+            elseif luasnip.locally_jumpable(-1) then
+              luasnip.jump(-1)
             else
               fallback()
             end

@@ -8,6 +8,63 @@ return {
         local capabilities = require("cmp_nvim_lsp").default_capabilities()
         capabilities.textDocument.completion.completionItem.snippetSupport = false
 
+        local function path_exists(path)
+          return type(path) == "string" and vim.uv.fs_stat(path) ~= nil
+        end
+
+        local function has_project_root(root_dir)
+          if type(root_dir) ~= "string" or root_dir == "" then
+            return false
+          end
+
+          return path_exists(vim.fs.joinpath(root_dir, "Cargo.toml"))
+            or path_exists(vim.fs.joinpath(root_dir, "rust-project.json"))
+        end
+
+        local function standalone_settings(default_settings)
+          local settings = vim.deepcopy(default_settings or {})
+          settings["rust-analyzer"] = settings["rust-analyzer"] or {}
+          local ra = settings["rust-analyzer"]
+          local current_file = vim.api.nvim_buf_get_name(0)
+
+          ra.notifications = vim.tbl_deep_extend("force", ra.notifications or {}, {
+            cargoTomlNotFound = false,
+          })
+
+          ra.cargo = vim.tbl_deep_extend("force", ra.cargo or {}, {
+            loadOutDirsFromCheck = false,
+            runBuildScripts = false,
+          })
+
+          ra.procMacro = vim.tbl_deep_extend("force", ra.procMacro or {}, {
+            enable = false,
+          })
+
+          if current_file ~= "" and current_file:match("%.rs$") then
+            ra.linkedProjects = { current_file }
+          end
+
+          if vim.fn.executable("rustc") == 1 then
+            ra.checkOnSave = true
+            ra.check = {
+              overrideCommand = {
+                "rustc",
+                "--crate-name",
+                "standalone",
+                "--edition=2024",
+                "--error-format=json",
+                "--json=diagnostic-rendered-ansi",
+                "--emit=metadata=-",
+                "{saved_file}",
+              },
+            }
+          else
+            ra.checkOnSave = false
+          end
+
+          return settings
+        end
+
         local dap_cfg = {}
         local mason_codelldb = vim.fn.stdpath("data") .. "/mason/packages/codelldb/extension/"
         if vim.fn.isdirectory(mason_codelldb) == 1 then
@@ -46,6 +103,16 @@ return {
           },
           server = {
             capabilities = capabilities,
+            root_dir = function(filename, default)
+              return default(filename) or vim.fs.dirname(filename)
+            end,
+            settings = function(project_root, default_settings)
+              if has_project_root(project_root) then
+                return vim.deepcopy(default_settings or {})
+              end
+
+              return standalone_settings(default_settings)
+            end,
             default_settings = {
               ["rust-analyzer"] = {
                 cargo = {

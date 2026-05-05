@@ -33,7 +33,9 @@ return {
 
     require('auto-session').setup({
       pre_save_cmds = { 'Neotree close', close_terminals },
-      post_restore_cmds = { 'Neotree filesystem show' },
+      post_restore_cmds = { function()
+        vim.cmd('Neotree filesystem show dir=' .. vim.fn.getcwd())
+      end },
     })
     vim.keymap.set('n', '<leader>z', '<cmd>AutoSession search<CR>', { desc = 'Session search' })
   end,

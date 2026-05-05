@@ -2,9 +2,9 @@
 -- Настройки только для C (локально для буфера)
 -- Allman + 2 пробела
 vim.bo.expandtab = true
-vim.bo.shiftwidth = 2
-vim.bo.softtabstop = 2
-vim.bo.tabstop = 2
+vim.bo.shiftwidth = 4
+vim.bo.softtabstop = 4
+vim.bo.tabstop = 4
 
 -- Включаем cindent для корректной перестановки отступов в C-family
 vim.bo.cindent = true
