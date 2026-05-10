@@ -26,22 +26,27 @@ vim.api.nvim_create_autocmd("QuitPre", {
 })
 
 
-vim.api.nvim_create_autocmd("FileType", {
-  pattern = { "c", "cpp", "java", "rust", "systemverilog", "javascript", "typescript" },
-  callback = function()
-    -- <expr> mapping: decide at runtime whether to just insert ';' or insert+Esc
-    vim.keymap.set("i", ";", function()
-      local line  = vim.api.nvim_get_current_line()
-      local col   = vim.fn.col(".")         -- 1-based cursor column
-      local eol   = #line + 1               -- position just past last char
-      if col == eol then
-        return ";<Esc>"
-      else
-        return ";"
-      end
-    end, { expr = true, noremap = true, buffer = true })
-  end,
-})
+-- Terminator-then-Esc: при наборе клозинг-символа в конце строки сразу
+-- выходим из insert mode. Внутри строки символ ведёт себя обычно.
+local function setup_eol_escape(filetypes, char)
+  vim.api.nvim_create_autocmd("FileType", {
+    pattern = filetypes,
+    callback = function()
+      vim.keymap.set("i", char, function()
+        local line = vim.api.nvim_get_current_line()
+        local col  = vim.fn.col(".")        -- 1-based позиция курсора
+        if col == #line + 1 then
+          return char .. "<Esc>"
+        else
+          return char
+        end
+      end, { expr = true, noremap = true, buffer = true })
+    end,
+  })
+end
+
+setup_eol_escape({ "c", "cpp", "java", "rust", "systemverilog", "javascript", "typescript" }, ";")
+setup_eol_escape({ "prolog" }, ".")
 
 -- Signature help по Ctrl+k (единственный способ)
 -- vim.api.nvim_create_autocmd("LspAttach", {
@@ -55,6 +60,18 @@ vim.api.nvim_create_autocmd("BufEnter", {
   callback = function()
     vim.cmd(":set formatoptions-=ro")
   end
+})
+
+-- При переходе в терминальный буфер автоматически включаем insert mode
+-- (terminal-job mode) — чтобы не приходилось каждый раз жать `i`/`a`.
+vim.api.nvim_create_autocmd({ "BufEnter", "WinEnter" }, {
+  pattern = "term://*",
+  callback = function()
+    -- Если процесс ещё жив, входим в режим ввода
+    if vim.bo.buftype == "terminal" then
+      vim.cmd("startinsert")
+    end
+  end,
 })
 
 -- vim.api.nvim_create_autocmd("VimEnter", {

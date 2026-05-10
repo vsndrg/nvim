@@ -3,11 +3,15 @@
 -- Вместо этого делаем минимальные buffer-local fallback'и.
 
 vim.bo.expandtab     = true
-vim.bo.shiftwidth    = 4
-vim.bo.softtabstop   = 4
-vim.bo.tabstop       = 4
+vim.bo.shiftwidth    = 2
+vim.bo.softtabstop   = 2
+vim.bo.tabstop       = 2
 vim.bo.commentstring = "%% %s"
 vim.opt_local.iskeyword:append("_")
+
+-- Indent: используется встроенный $VIMRUNTIME/indent/prolog.vim
+-- (GetPrologIndent): он понимает :- / --> / `.` / `(` / `;` / `->`.
+-- treesitter-indent для prolog отключён в lua/plugins/treesitter.lua.
 
 local ide = require("prolog.ide")
 
@@ -16,7 +20,7 @@ local function map(mode, lhs, rhs, desc)
 end
 
 -- IDE / REPL управление
-map("n", "<leader>pi", function() ide.open()             end, "Prolog: open 3-pane IDE")
+map("n", "<leader>pi", function() ide.toggle()           end, "Prolog: toggle 3-pane IDE")
 map("n", "<leader>pq", function() ide.focus_query()      end, "Prolog: focus query")
 map("n", "<leader>pc", function() ide.consult_current()  end, "Prolog: consult current file")
 map("n", "<leader>pr", function() ide.restart()          end, "Prolog: restart REPL")

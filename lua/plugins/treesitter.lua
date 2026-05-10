@@ -13,8 +13,12 @@ return {
         },
         indent = {
           enable = true,
-          -- Отключаем treesitter indent для C/C++ — используем cindent с Allman style
-          disable = { "c", "cpp" }
+          -- C/C++: используем cindent с Allman style.
+          -- Prolog: оставляем встроенный $VIMRUNTIME/indent/prolog.vim,
+          -- который корректно отступает после :- / --> / ( / ; и dedent'ит
+          -- по . — treesitter indent для prolog ставит b:did_indent=1 и
+          -- блокирует штатный indent file.
+          disable = { "c", "cpp", "prolog" }
         }
       })
     end

@@ -24,8 +24,12 @@ return {
     ft = { "prolog" },
     config = function()
       vim.api.nvim_create_user_command("PrologIDE", function()
-        require("prolog.ide").open()
-      end, { desc = "Open tuProlog 3-pane IDE" })
+        require("prolog.ide").toggle()
+      end, { desc = "Toggle tuProlog 3-pane IDE" })
+
+      vim.api.nvim_create_user_command("PrologIDEClose", function()
+        require("prolog.ide").close()
+      end, { desc = "Close tuProlog 3-pane IDE" })
 
       vim.api.nvim_create_user_command("PrologRestart", function()
         require("prolog.ide").restart()

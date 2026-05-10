@@ -170,24 +170,45 @@ function M.open()
 
   -- query — снизу под editor
   vim.api.nvim_set_current_win(editor_win)
-  vim.cmd("rightbelow 5split")
+  vim.cmd("rightbelow split")
   state.query_win = vim.api.nvim_get_current_win()
   vim.api.nvim_win_set_buf(state.query_win, state.query_buf)
   vim.wo[state.query_win].number = false
   vim.wo[state.query_win].relativenumber = false
-  vim.wo[state.query_win].winfixheight = true
 
   -- output — снизу под query
-  vim.cmd("rightbelow 12split")
+  vim.cmd("rightbelow split")
   state.output_win = vim.api.nvim_get_current_win()
   vim.api.nvim_win_set_buf(state.output_win, state.output_buf)
   vim.wo[state.output_win].number = false
   vim.wo[state.output_win].relativenumber = false
   vim.wo[state.output_win].wrap = true
+
+  -- equalalways=true (дефолт Neovim) перераспределяет окна поровну после
+  -- каждого :split, поэтому числа `Nsplit` игнорируются. Задаём высоту
+  -- явно и сразу лочим winfixheight, иначе следующий set_height отнимет
+  -- строки у уже отредактированного соседа.
+  vim.api.nvim_win_set_height(state.query_win, 4)
+  vim.wo[state.query_win].winfixheight = true
+  vim.api.nvim_win_set_height(state.output_win, 8)
   vim.wo[state.output_win].winfixheight = true
 
   setup_query_keymaps(state.query_buf)
   setup_output_keymaps(state.output_buf)
+
+  -- Когда переключаешься в query-окно из любого другого — автоматически
+  -- входим в insert mode (REPL-поведение). Чистим предыдущий autocmd на
+  -- этот буфер, чтобы при повторном открытии IDE не плодить дубли.
+  vim.api.nvim_clear_autocmds({ buffer = state.query_buf, group = nil })
+  vim.api.nvim_create_autocmd("BufEnter", {
+    buffer = state.query_buf,
+    callback = function()
+      -- защита от срабатывания, когда буфер уже в insert mode
+      if vim.api.nvim_get_mode().mode:sub(1, 1) ~= "i" then
+        vim.cmd("startinsert")
+      end
+    end,
+  })
 
   -- consult текущего .pl файла
   local editor_buf = vim.api.nvim_win_get_buf(editor_win)
@@ -204,26 +225,49 @@ function M.open()
     vim.api.nvim_buf_set_lines(state.query_buf, 0, -1, false, { "" })
   end
 
-  vim.api.nvim_set_current_win(state.query_win)
-  vim.cmd("startinsert")
+  -- курсор остаётся в editor — пользователь сам перейдёт в query (через
+  -- <C-j> или клик), и тогда BufEnter autocmd выше включит insert mode.
+  vim.api.nvim_set_current_win(editor_win)
 end
 
 function M.close()
-  if state.query_win and vim.api.nvim_win_is_valid(state.query_win) then
-    pcall(vim.api.nvim_win_close, state.query_win, false)
+  -- закрываем все окна, показывающие наши буферы (state.*_win может
+  -- устареть, если пользователь закрыл их вручную и переоткрыл из IDE).
+  local targets = {}
+  if state.query_buf  and vim.api.nvim_buf_is_valid(state.query_buf)  then targets[state.query_buf]  = true end
+  if state.output_buf and vim.api.nvim_buf_is_valid(state.output_buf) then targets[state.output_buf] = true end
+  for _, w in ipairs(vim.api.nvim_list_wins()) do
+    if targets[vim.api.nvim_win_get_buf(w)] then
+      pcall(vim.api.nvim_win_close, w, false)
+    end
   end
-  if state.output_win and vim.api.nvim_win_is_valid(state.output_win) then
-    pcall(vim.api.nvim_win_close, state.output_win, false)
+  state.query_win  = nil
+  state.output_win = nil
+end
+
+function M.is_open()
+  for _, w in ipairs(vim.api.nvim_list_wins()) do
+    local b = vim.api.nvim_win_get_buf(w)
+    if (state.query_buf and b == state.query_buf)
+       or (state.output_buf and b == state.output_buf) then
+      return true
+    end
   end
+  return false
+end
+
+function M.toggle()
+  if M.is_open() then M.close() else M.open() end
 end
 
 function M.focus_query()
   if not (state.query_win and vim.api.nvim_win_is_valid(state.query_win)) then
     M.open()
-    return
   end
-  vim.api.nvim_set_current_win(state.query_win)
-  vim.cmd("startinsert")
+  -- BufEnter autocmd на query_buf сам включит insert mode
+  if state.query_win and vim.api.nvim_win_is_valid(state.query_win) then
+    vim.api.nvim_set_current_win(state.query_win)
+  end
 end
 
 function M.consult_current()

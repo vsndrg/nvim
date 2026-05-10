@@ -46,11 +46,19 @@ km.set("n", "<leader><Tab>", "i<Tab><Esc><Right>", opts)
 km.set('n', '<M-k>', ':m .-2<CR>==', opts)
 km.set('n', '<M-j>', ':m .+1<CR>==', opts)
 
--- Switch between opened windows commands
+-- Switch between opened windows commands.
+-- Insert-mode варианты выходят из insert и сразу переключают окно —
+-- удобно при работе с REPL'ами/output-буферами, где постоянно прыгаешь
+-- между insert (ввод query) и normal (просмотр результата).
+-- Trade-off: ломается дефолтный <C-k> для диграфов (:help i_CTRL-K).
 km.set('n', '<C-h>', '<C-w>h', opts)
 km.set('n', '<C-j>', '<C-w>j', opts)
 km.set('n', '<C-k>', '<C-w>k', opts)
 km.set('n', '<C-l>', '<C-w>l', opts)
+km.set('i', '<C-h>', '<Esc><C-w>h', opts)
+km.set('i', '<C-j>', '<Esc><C-w>j', opts)
+km.set('i', '<C-k>', '<Esc><C-w>k', opts)
+km.set('i', '<C-l>', '<Esc><C-w>l', opts)
 
 -- PageUp/Down
 km.set('n', '<C-u>', '<C-u>zz', opts)
@@ -124,8 +132,10 @@ local function toggle_terminal()
     end
   end
 
-  -- Открыть сплит на треть высоты экрана
-  local height = math.floor(vim.o.lines / 2)
+  -- Высота — процент от текущего окна (а не от всего экрана), чтобы при
+  -- работе в split'ах терминал не съедал чужие окна.
+  local pct = 0.38196601
+  local height = math.max(5, math.floor(vim.api.nvim_win_get_height(0) * pct))
   vim.cmd('belowright ' .. height .. 'split')
   term_win = vim.api.nvim_get_current_win()
 
