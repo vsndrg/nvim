@@ -212,6 +212,16 @@ return {
         },
       })
 
+      -- Prolog: без LSP (tuProlog-диалект). Источники: snippets, buffer
+      -- (предикаты из текущего файла), path.
+      cmp.setup.filetype('prolog', {
+        sources = cmp.config.sources({
+          { name = 'luasnip', priority = 750 },
+          { name = 'buffer',  priority = 500, keyword_length = 2 },
+          { name = 'path',    priority = 300 },
+        }),
+      })
+
       cmp.setup.filetype('toml', {
         sources = cmp.config.sources({
           { name = 'crates' },

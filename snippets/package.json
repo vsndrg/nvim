@@ -5,6 +5,10 @@
       {
         "language": ["cpp", "c"],
         "path": "./cpp.json"
+      },
+      {
+        "language": ["prolog"],
+        "path": "./prolog.json"
       }
     ]
   }

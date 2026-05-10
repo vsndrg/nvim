@@ -1,0 +1,99 @@
+{
+  "directive": {
+    "prefix": ":-",
+    "body": ":- ${1:goal}.",
+    "description": "Directive (executed at consult time)"
+  },
+  "fact": {
+    "prefix": "fact",
+    "body": "${1:name}(${2:args}).",
+    "description": "Fact"
+  },
+  "rule": {
+    "prefix": "rule",
+    "body": "${1:head}(${2:args}) :- ${3:body}.",
+    "description": "Rule head :- body."
+  },
+  "if-then-else": {
+    "prefix": "if",
+    "body": "(${1:Cond} -> ${2:Then} ; ${3:Else})",
+    "description": "If-then-else (Cond -> Then ; Else)"
+  },
+  "not": {
+    "prefix": "not",
+    "body": "\\\\+ ${1:Goal}",
+    "description": "Negation as failure (\\+ Goal)"
+  },
+  "member": {
+    "prefix": "member",
+    "body": [
+      "member(X, [X | _]).",
+      "member(X, [_ | T]) :- member(X, T)."
+    ],
+    "description": "member/2 (наивная реализация)"
+  },
+  "append": {
+    "prefix": "append",
+    "body": [
+      "append([], L, L).",
+      "append([H | T], L, [H | R]) :- append(T, L, R)."
+    ],
+    "description": "append/3"
+  },
+  "length": {
+    "prefix": "length",
+    "body": [
+      "len([], 0).",
+      "len([_ | T], N) :- len(T, N1), N is N1 + 1."
+    ],
+    "description": "длина списка"
+  },
+  "reverse": {
+    "prefix": "reverse",
+    "body": [
+      "reverse([], []).",
+      "reverse([H | T], R) :- reverse(T, RT), append(RT, [H], R)."
+    ],
+    "description": "reverse/2 через append"
+  },
+  "dcg": {
+    "prefix": "dcg",
+    "body": "${1:head} --> ${2:body}.",
+    "description": "DCG-правило"
+  },
+  "assert": {
+    "prefix": "assert",
+    "body": "assert(${1:Fact})",
+    "description": "assert/1"
+  },
+  "retract": {
+    "prefix": "retract",
+    "body": "retract(${1:Fact})",
+    "description": "retract/1"
+  },
+  "is": {
+    "prefix": "is",
+    "body": "${1:X} is ${2:Expr}",
+    "description": "арифметическое присваивание"
+  },
+  "module": {
+    "prefix": "module",
+    "body": ":- module(${1:name}, [${2:exports}]).",
+    "description": "Module declaration"
+  },
+  "use_module": {
+    "prefix": "use_module",
+    "body": ":- use_module(library(${1:name})).",
+    "description": "Use library module"
+  },
+  "spy": {
+    "prefix": "spy",
+    "body": ":- spy(${1:pred}/${2:arity}).",
+    "description": "Set spy point"
+  },
+  "trace": {
+    "prefix": "trace",
+    "body": ":- trace.",
+    "description": "Enable tracing"
+  }
+}
