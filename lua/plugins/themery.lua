@@ -111,6 +111,17 @@ return {
 
       vim.keymap.set("n", "<leader>p", "<cmd>Themery<cr>",
         { desc = "Theme switcher", noremap = true, silent = true })
+
+      -- Add `l` as an alias for <CR> in the picker (h/j/k/l navigation feel).
+      -- `remap = true` lets it chain into themery's own <CR> -> closeAndSave.
+      vim.api.nvim_create_autocmd("FileType", {
+        pattern = "themery",
+        callback = function(args)
+          vim.keymap.set("n", "l", "<CR>", {
+            buffer = args.buf, silent = true, remap = true,
+          })
+        end,
+      })
     end,
   },
 }

@@ -212,6 +212,28 @@ return {
         },
       })
 
+      -- Clojure: добавляем conjure-источник (видит символы из живого nREPL,
+      -- включая то, что было подгружено через load-file / load — clojure-lsp
+      -- этого статически увидеть не может).
+      for _, ft in ipairs({ 'clojure', 'clojurescript', 'fennel' }) do
+        cmp.setup.filetype(ft, {
+          sources = cmp.config.sources({
+            { name = 'conjure', priority = 900 },
+            {
+              name = 'nvim_lsp',
+              priority = 1000,
+              entry_filter = function(entry)
+                return entry:get_kind() ~= 15
+              end,
+            },
+            { name = 'luasnip', priority = 750 },
+            { name = 'path',    priority = 500 },
+          }, {
+            { name = 'buffer', priority = 250, keyword_length = 3 },
+          }),
+        })
+      end
+
       -- Prolog: без LSP (tuProlog-диалект). Источники: snippets, buffer
       -- (предикаты из текущего файла), path.
       cmp.setup.filetype('prolog', {

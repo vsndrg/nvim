@@ -12,6 +12,14 @@ vim.o.shiftwidth = 2
 vim.o.tabstop = 2
 vim.o.smartindent = false
 
+-- New :split opens below the current window (instead of above).
+vim.o.splitbelow = true
+
+-- Disable built-in matchparen: its searchpairpos()-based implementation
+-- freezes on deeply-nested Lisp code. Replaced by monkoose/matchparen.nvim
+-- (treesitter-driven, drop-in replacement) — see lua/plugins/treesitter.lua.
+vim.g.loaded_matchparen = 1
+
 vim.o.ignorecase = true
 vim.o.smartcase = true
 
