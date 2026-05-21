@@ -211,19 +211,13 @@ return {
   },
 
   ----------------------------------------------------------------------------
-  -- 5. Signature help popup. lsp_signature attaches per-buffer from
-  --    lang/cpp.lua's on_clangd_attach — global keymaps are not touched.
-  ----------------------------------------------------------------------------
-  {
-    "ray-x/lsp_signature.nvim",
-    ft = { "c", "cpp", "objc", "objcpp", "cuda" },
-  },
-
-  ----------------------------------------------------------------------------
-  -- 6. Treesitter-based cmp source. Surfaces language keywords (private,
+  -- 5. Treesitter-based cmp source. Surfaces language keywords (private,
   --    public, constexpr, noexcept, …) and project identifiers regardless
   --    of clangd's context heuristics. Registered as a filetype-scoped cmp
   --    source in lang/cpp.lua so other languages keep their existing sources.
+  --    Signature help is owned by noice.nvim (default lsp.signature.auto_open
+  --    + lsp_doc_border preset in lua/plugins/cmdline.lua) — single popup, no
+  --    per-buffer setup needed here.
   ----------------------------------------------------------------------------
   {
     "ray-x/cmp-treesitter",

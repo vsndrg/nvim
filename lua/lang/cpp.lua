@@ -371,21 +371,89 @@ local function map(bufnr, mode, lhs, rhs, desc)
   vim.keymap.set(mode, lhs, rhs, { buffer = bufnr, silent = true, desc = desc })
 end
 
--- Buffer-local signature help via ray-x/lsp_signature.nvim.
--- Scoped to clangd buffers so other languages stay untouched.
-local function setup_signature_help(client, bufnr)
-  local ok, sig = pcall(require, "lsp_signature")
-  if not ok then return end
-  sig.on_attach({
-    bind = true,
-    hint_enable = false,        -- no inline virtual hints; only floating popup
-    floating_window = true,
-    floating_window_above_cur_line = true,
-    hi_parameter = "IncSearch",
-    handler_opts = { border = "rounded" },
-    toggle_key = "<C-s>",       -- toggle signature window
-    select_signature_key = "<C-n>",
-  }, bufnr)
+-- cppman — cppreference manpage lookup in a floating window.
+-- Requires the `cppman` CLI on $PATH (`brew install cppman`).
+local function cppman_open_float(symbol, lines)
+  local buf = vim.api.nvim_create_buf(false, true)
+  vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
+  vim.bo[buf].modifiable = false
+  vim.bo[buf].buftype    = "nofile"
+  vim.bo[buf].bufhidden  = "wipe"
+  vim.bo[buf].filetype   = "man"
+
+  -- Layer C++ treesitter highlighting on top of the `man` filetype: section
+  -- headers (NAME, SYNOPSIS, …) stay highlighted by man.vim, while code
+  -- blocks pick up keyword/type/operator colors from the cpp parser.
+  pcall(vim.treesitter.start, buf, "cpp")
+
+  local width  = math.floor(vim.o.columns * 0.8)
+  local height = math.floor(vim.o.lines * 0.75)
+  local row    = math.floor((vim.o.lines - height) / 2)
+  local col    = math.floor((vim.o.columns - width) / 2)
+
+  local win = vim.api.nvim_open_win(buf, true, {
+    relative  = "editor",
+    width     = width,
+    height    = height,
+    row       = row,
+    col       = col,
+    style     = "minimal",
+    border    = "rounded",
+    title     = " cppman: " .. symbol .. " ",
+    title_pos = "center",
+  })
+  vim.wo[win].wrap       = false
+  vim.wo[win].cursorline = true
+
+  local function close()
+    if vim.api.nvim_win_is_valid(win) then vim.api.nvim_win_close(win, true) end
+  end
+  local opts = { buffer = buf, nowait = true, silent = true }
+  vim.keymap.set("n", "q",     close, opts)
+  vim.keymap.set("n", "<Esc>", close, opts)
+  vim.keymap.set("n", "<C-c>", close, opts)
+end
+
+-- In-memory cache: { [symbol] = { lines... } }. Survives for the lifetime of
+-- the Neovim session, layered on top of cppman's own ~/.cache/cppman disk
+-- cache. Wipe with `:lua require("lang.cpp")._reset_cppman_cache()` if needed.
+local cppman_cache = {}
+
+function M._reset_cppman_cache() cppman_cache = {} end
+
+local function cppman_lookup(symbol)
+  if not symbol or symbol == "" then
+    vim.notify("cppman: no symbol under cursor", vim.log.levels.WARN)
+    return
+  end
+  if vim.fn.executable("cppman") == 0 then
+    vim.notify("cppman: CLI not found — `brew install cppman`", vim.log.levels.ERROR)
+    return
+  end
+  if cppman_cache[symbol] then
+    cppman_open_float(symbol, cppman_cache[symbol])
+    return
+  end
+  vim.system(
+    { "cppman", symbol },
+    { text = true, env = { MANPAGER = "cat", PAGER = "cat", MANWIDTH = tostring(math.max(80, math.floor(vim.o.columns * 0.8) - 4)) } },
+    vim.schedule_wrap(function(obj)
+      local out = obj.stdout or ""
+      if obj.code ~= 0 or out == "" then
+        vim.notify("cppman: no entry for `" .. symbol .. "`", vim.log.levels.INFO)
+        return
+      end
+      local lines = vim.split(out, "\n", { plain = true, trimempty = false })
+      cppman_cache[symbol] = lines
+      cppman_open_float(symbol, lines)
+    end)
+  )
+end
+
+local function cppman_prompt()
+  vim.ui.input({ prompt = "cppman: ", default = vim.fn.expand("<cword>") }, function(input)
+    if input then cppman_lookup(input) end
+  end)
 end
 
 local function on_clangd_attach(client, bufnr)
@@ -393,8 +461,9 @@ local function on_clangd_attach(client, bufnr)
   map(bufnr, "n", "gh", function() switch_source_header(bufnr) end, "C++: switch source/header")
   map(bufnr, "n", "<F4>", function() switch_source_header(bufnr) end, "C++: switch source/header")
 
-  -- Signature help popup.
-  setup_signature_help(client, bufnr)
+  -- cppman lookup.
+  map(bufnr, "n", "gK",         function() cppman_lookup(vim.fn.expand("<cword>")) end, "C++: cppman lookup (word)")
+  map(bufnr, "n", "<leader>cM", cppman_prompt,                                          "C++: cppman lookup (prompt)")
 
   -- Hierarchies.
   map(bufnr, "n", "<leader>ch", vim.lsp.buf.incoming_calls,  "C++: incoming calls")
