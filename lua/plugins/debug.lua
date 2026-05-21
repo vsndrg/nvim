@@ -46,7 +46,7 @@ return {
       dap.listeners.before.attach.debug_neotree = function() close_neotree() end
       dap.listeners.before.launch.debug_neotree = function() close_neotree() end
 
-      -- Configure DAP for C/C++
+      -- DAP adapters (shared across languages).
       dap.adapters.gdb = {
         type = "executable",
         command = "gdb",
@@ -61,42 +61,7 @@ return {
         }
       }
 
-      dap.configurations.c = {
-        {
-          name = "Launch (gdb)",
-          type = "gdb",
-          request = "launch",
-          program = function()
-            return vim.fn.input('Path to executable: ', vim.fn.getcwd() .. '/', 'file')
-          end,
-          cwd = "${workspaceFolder}",
-          stopAtBeginningOfMainSubprogram = false,
-        },
-        {
-          name = "Select and attach to process",
-          type = "gdb",
-          request = "attach",
-          program = function()
-             return vim.fn.input('Path to executable: ', vim.fn.getcwd() .. '/', 'file')
-          end,
-          pid = function()
-             local name = vim.fn.input('Executable name (filter): ')
-             return require("dap.utils").pick_process({ filter = name })
-          end,
-          cwd = '${workspaceFolder}'
-        },
-        {
-          name = 'Attach to gdbserver :1234',
-          type = 'gdb',
-          request = 'attach',
-          target = 'localhost:1234',
-          program = function()
-             return vim.fn.input('Path to executable: ', vim.fn.getcwd() .. '/', 'file')
-          end,
-          cwd = '${workspaceFolder}'
-        },
-      }
-      -- dap.configurations.cpp = dap.configurations.c
+      -- C/C++ DAP configurations are registered from lua/lang/cpp.lua.
 
       dap.configurations.rust = {
         {
@@ -130,29 +95,7 @@ return {
         -- },
       }
 
-      dap.configurations.cpp = {
-        {
-          name = "Launch (codelldb)",
-          type = "codelldb",
-          request = "launch",
-          program = function()
-            local cwd = vim.fn.getcwd()
-            local name = vim.fn.fnamemodify(cwd, ":t")
-            local path = cwd .. "/build/" .. name
-            return path
-          end,
-          cwd = "${workspaceFolder}",
-          stopOnEntry = false,
-          console = 'integratedTerminal',
-          args = function()
-            local input = vim.fn.input("Program arguments (space-separated): ")
-            if input == "" then
-              return {}
-            end
-            return vim.split(input, "%s+")
-          end,
-        },
-      }
+      -- dap.configurations.cpp / .c — see lua/lang/cpp.lua (setup_dap).
 
       local uv = vim.loop
 

@@ -15,7 +15,7 @@ return {
       automatic_setup = false,
       ensure_installed = {
         "lua_ls",
-        "clangd",
+        -- clangd: managed by lua/plugins/cpp.lua (prefers Homebrew LLVM clangd).
         -- "jdtls",
         "rust_analyzer",
         "pyright",
@@ -23,7 +23,7 @@ return {
         "verible",
         "ts_ls",
         "eslint",
-        "clojure-lsp",
+        "clojure_lsp",
       }
     }
   },
@@ -90,66 +90,7 @@ return {
           },
         }
       })
-      -- Расширенные capabilities для clangd
-      local clangd_capabilities = vim.deepcopy(capabilities)
-      clangd_capabilities.offsetEncoding = { "utf-16" }
-      -- Включаем semantic tokens для богатой подсветки C/C++
-      clangd_capabilities.textDocument.semanticTokens = {
-        dynamicRegistration = false,
-        requests = {
-          range = false,
-          full = { delta = true },
-        },
-        tokenTypes = {
-          "namespace", "type", "class", "enum", "interface",
-          "struct", "typeParameter", "parameter", "variable",
-          "property", "enumMember", "event", "function", "method",
-          "macro", "keyword", "modifier", "comment", "string",
-          "number", "regexp", "operator", "decorator",
-        },
-        tokenModifiers = {
-          "declaration", "definition", "readonly", "static",
-          "deprecated", "abstract", "async", "modification",
-          "documentation", "defaultLibrary",
-        },
-        formats = { "relative" },
-        overlappingTokenSupport = true,
-        multilineTokenSupport = true,
-      }
-
-      -- Попробовать LLVM clangd (brew install llvm), иначе системный
-      local clangd_cmd = "clangd"
-      local llvm_clangd = "/opt/homebrew/opt/llvm/bin/clangd"
-      if vim.fn.executable(llvm_clangd) == 1 then
-        clangd_cmd = llvm_clangd
-      end
-
-      lspconfig.clangd.setup({
-        capabilities = clangd_capabilities,
-        cmd = {
-          clangd_cmd,
-          "--background-index",           -- индексация в фоне
-          "--clang-tidy",                 -- включить clang-tidy
-          "--completion-style=detailed",  -- подробные completions
-          "--header-insertion=iwyu",      -- умная вставка #include
-          "--header-insertion-decorators",
-          -- БЕЗ --function-arg-placeholders — не подставлять аргументы автоматически
-          "--fallback-style=LLVM",        -- fallback стиль форматирования
-          "--all-scopes-completion",      -- completion из всех scope
-          "--pch-storage=memory",         -- precompiled headers в памяти
-          "--suggest-missing-includes",   -- предлагать недостающие includes
-          "-j=4",                         -- 4 потока для индексации
-        },
-        init_options = {
-          usePlaceholders = false,        -- НЕ использовать плейсхолдеры
-          completeUnimported = true,
-          clangdFileStatus = true,
-        },
-      })
-
-      -- lspconfig.svls.setup({
-      --   capabilities = capabilities
-      -- })
+      -- clangd is set up in lua/lang/cpp.lua (orchestrated by lua/plugins/cpp.lua).
 
       lspconfig.verible.setup({
         capabilities = capabilities

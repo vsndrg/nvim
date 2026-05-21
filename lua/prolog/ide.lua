@@ -106,19 +106,22 @@ local function recall_history(delta)
   state.history_idx = math.max(1, math.min(#state.history, (state.history_idx or #state.history) + delta))
   local item = state.history[state.history_idx]
   if not item then return end
-  vim.api.nvim_buf_set_lines(state.query_buf, 0, -1, false, vim.split(item, "\n", { plain = true }))
+  local lines = vim.split(item, "\n", { plain = true })
+  vim.api.nvim_buf_set_lines(state.query_buf, 0, -1, false, lines)
+  -- place cursor at end of last line so editing continues naturally
+  if state.query_win and vim.api.nvim_win_is_valid(state.query_win) then
+    local last_line = #lines
+    pcall(vim.api.nvim_win_set_cursor, state.query_win, { last_line, #lines[last_line] })
+  end
 end
 
 local function setup_query_keymaps(buf)
   local opts = { buffer = buf, silent = true }
 
-  vim.keymap.set("n", "<CR>", submit_current_query, opts)
-  vim.keymap.set("i", "<CR>", function()
-    vim.cmd("stopinsert")
-    submit_current_query()
-  end, opts)
+  -- <CR> submits and stays in current mode (insert stays in insert).
+  vim.keymap.set({ "n", "i" }, "<CR>", submit_current_query, opts)
 
-  -- newline-варианты (когда хочется multi-line query):
+  -- newline variants (multi-line queries):
   vim.keymap.set("i", "<S-CR>", "<CR>", opts)
   vim.keymap.set("i", "<C-CR>", "<CR>", opts)
   vim.keymap.set("i", "<M-CR>", "<CR>", opts)
@@ -131,8 +134,10 @@ local function setup_query_keymaps(buf)
     repl.stop_solve(reply(""))
   end, opts)
 
-  vim.keymap.set("n", "<Up>",   function() recall_history(-1) end, opts)
-  vim.keymap.set("n", "<Down>", function() recall_history( 1) end, opts)
+  -- History: arrows in normal AND insert (overrides cmp's <Up>/<Down> navigation
+  -- for the completion popup in this buffer; use <A-j>/<A-k> for cmp instead).
+  vim.keymap.set({ "n", "i" }, "<Up>",   function() recall_history(-1) end, opts)
+  vim.keymap.set({ "n", "i" }, "<Down>", function() recall_history( 1) end, opts)
 end
 
 local function setup_output_keymaps(buf)
