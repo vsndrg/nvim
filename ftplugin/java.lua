@@ -236,10 +236,10 @@ end, vim.tbl_extend("force", opts, { desc = "Debug test" }))
 -- ═══════════════════════════════════════════════════════════════════════════
 
 -- Update project configuration (after changing pom.xml/build.gradle)
-vim.keymap.set("n", "<leader>pu", function()
-  require("jdtls").update_projects_config()
-  print("Project configuration updated")
-end, vim.tbl_extend("force", opts, { desc = "Update project config" }))
+-- vim.keymap.set("n", "<leader>pu", function()
+--   require("jdtls").update_projects_config()
+--   print("Project configuration updated")
+-- end, vim.tbl_extend("force", opts, { desc = "Update project config" }))
 
 -- ═══════════════════════════════════════════════════════════════════════════
 -- CREATE NEW CLASS (<leader>n...)

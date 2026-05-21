@@ -32,6 +32,19 @@ return {
     "marko-cerovac/material.nvim",      lazy = true,
   },
   {
+    -- JetBrains Darcula port: тёплый десатурированный фон, минимум кислоты.
+    "xiantang/darcula-dark.nvim",       lazy = true,
+    dependencies = { "nvim-treesitter/nvim-treesitter" },
+  },
+  {
+    -- VS Code Dark+ / Light: соседнее «IDE-семейство» с похожей эстетикой.
+    "Mofiqul/vscode.nvim",              lazy = true,
+  },
+  {
+    -- JetBrains IDE color scheme (dark + light via background)
+    "nickkadutskyi/jb.nvim",            lazy = true,
+  },
+  {
     -- Themery — интерактивный переключатель тем с live preview и persistence
     "zaldih/themery.nvim",
     lazy = false,
@@ -86,6 +99,14 @@ return {
             before = [[ vim.g.material_style = "palenight" ]] },
           { name = "Material Deep Ocean",  colorscheme = "material",
             before = [[ vim.g.material_style = "deep ocean" ]] },
+          -- JetBrains Darcula
+          { name = "Darcula (JetBrains)",  colorscheme = "darcula-dark" },
+          -- JetBrains IDE (nickkadutskyi/jb.nvim)
+          { name = "JB Dark",              colorscheme = "jb",
+            before = [[ vim.opt.background = "dark" ]] },
+          -- VS Code dark variants
+          { name = "VS Code Dark+",        colorscheme = "vscode",
+            before = [[ vim.g.vscode_style = "dark" ]] },
 
           -- ── Light themes ─────────────────────────────────────────────────
           { name = "Catppuccin Latte",     colorscheme = "catppuccin-latte" },
@@ -106,6 +127,12 @@ return {
           },
           { name = "Material Lighter",     colorscheme = "material",
             before = [[ vim.g.material_style = "lighter" ]] },
+          -- JetBrains IDE light
+          { name = "JB Light",             colorscheme = "jb",
+            before = [[ vim.opt.background = "light" ]] },
+          -- VS Code light
+          { name = "VS Code Light",        colorscheme = "vscode",
+            before = [[ vim.g.vscode_style = "light" ]] },
         },
       })
 
