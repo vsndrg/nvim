@@ -36,6 +36,9 @@ return {
       post_restore_cmds = { function()
         vim.cmd('Neotree filesystem show dir=' .. vim.fn.getcwd())
       end },
+      session_lens = {
+        picker_opts = { initial_mode = 'normal' },
+      },
     })
     vim.keymap.set('n', '<leader>z', '<cmd>AutoSession search<CR>', { desc = 'Session search' })
   end,
