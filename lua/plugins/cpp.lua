@@ -24,7 +24,6 @@ return {
     priority = 100,
     dependencies = {
       "neovim/nvim-lspconfig",
-      "hrsh7th/cmp-nvim-lsp",
     },
     config = function()
       require("clangd_extensions").setup({
@@ -210,21 +209,9 @@ return {
     end,
   },
 
-  ----------------------------------------------------------------------------
-  -- 5. Treesitter-based cmp source. Surfaces language keywords (private,
-  --    public, constexpr, noexcept, …) and project identifiers regardless
-  --    of clangd's context heuristics. Registered as a filetype-scoped cmp
-  --    source in lang/cpp.lua so other languages keep their existing sources.
-  --    Signature help is owned by noice.nvim (default lsp.signature.auto_open
-  --    + lsp_doc_border preset in lua/plugins/cmdline.lua) — single popup, no
-  --    per-buffer setup needed here.
-  ----------------------------------------------------------------------------
-  {
-    "ray-x/cmp-treesitter",
-    ft = { "c", "cpp", "objc", "objcpp", "cuda" },
-    dependencies = { "hrsh7th/nvim-cmp", "nvim-treesitter/nvim-treesitter" },
-  },
-
+  -- Note: C/C++ keyword completion is provided by lua/lang/cpp_keywords.lua
+  -- (a native blink.cmp source). Signature help is owned by noice.nvim.
+  --
   -- Note: nvim-dap C/C++ configuration is registered from lang/cpp.lua via
   -- a FileType autocmd (see setup_autocmds). nvim-dap itself is owned by
   -- lua/plugins/debug.lua to keep one source of truth for the plugin spec.

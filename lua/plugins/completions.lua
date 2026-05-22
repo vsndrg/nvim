@@ -1,9 +1,13 @@
+-- Completion engine: blink.cmp.
+--
+-- Sources, snippets, IDE-style ranking and Copilot Tab integration live here.
+-- LSP capabilities come from blink.cmp (see lua/plugins/lsp.lua etc.).
+-- Signature help is owned by noice.nvim — blink's signature is disabled to
+-- avoid double popups.
+
 return {
-  {
-    'hrsh7th/cmp-nvim-lsp'
-  },
-  -- cmp-latex-symbols removed: inserts unicode instead of LaTeX commands
-  -- texlab LSP provides proper \alpha, \beta etc. completions
+  -- Copilot — inline ghost suggestions, toggled via <leader>cp.
+  -- Tab logic lives in blink.cmp keymap below so both interact cleanly.
   {
     'github/copilot.vim',
     init = function()
@@ -12,7 +16,6 @@ return {
       vim.g.copilot_hide_during_completion = false
     end,
     config = function()
-      -- Toggle Copilot on/off
       vim.keymap.set('n', '<leader>cp', function()
         if vim.g.copilot_enabled == false then
           vim.cmd('Copilot enable')
@@ -24,246 +27,254 @@ return {
           print('Copilot disabled')
         end
       end, { noremap = true, silent = true })
-      
-      -- Tab: accept Copilot suggestion if enabled, otherwise handled by cmp
-      vim.keymap.set('i', '<Tab>', function()
-        local cmp = require('cmp')
-        local luasnip = require('luasnip')
-        
-        if vim.g.copilot_enabled then
-          -- Copilot enabled: accept suggestion if available
-          local suggestion = vim.fn['copilot#GetDisplayedSuggestion']()
-          if suggestion.text ~= '' then
-            return vim.fn['copilot#Accept']('')
-          end
-        end
-        
-        -- No Copilot suggestion or Copilot disabled: use cmp/snippets
-        if cmp.visible() then
-          vim.schedule(function()
-            cmp.confirm({ select = true })
-          end)
-          return ''
-        elseif luasnip.expand_or_jumpable() then
-          vim.schedule(function()
-            luasnip.expand_or_jump()
-          end)
-          return ''
-        else
-          return '\t'
-        end
-      end, {
-        expr = true,
-        replace_keycodes = false,
-        silent = true
-      })
-      
-      -- Accept one line of Copilot suggestion
+
+      -- Accept one line of Copilot suggestion (whole-suggestion accept is Tab,
+      -- handled in blink.cmp keymap).
       vim.keymap.set('i', '<C-l>', '<Plug>(copilot-accept-line)', { silent = true })
-    end
+    end,
   },
+
+  -- LuaSnip + friendly-snippets + user snippets at ~/.config/nvim/snippets/.
   {
     'L3MON4D3/LuaSnip',
-    dependencies = {
-      'saadparwaiz1/cmp_luasnip',
-      'rafamadriz/friendly-snippets'
-    },
+    dependencies = { 'rafamadriz/friendly-snippets' },
     config = function()
-      require("luasnip.loaders.from_vscode").lazy_load()
-      -- Загружаем свои сниппеты из ~/.config/nvim/snippets/
-      require("luasnip.loaders.from_vscode").lazy_load({ paths = { vim.fn.stdpath("config") .. "/snippets" } })
-    end
-  },
-  {
-    'onsails/lspkind.nvim',
-    config = function()
-      require('lspkind').init({
-        mode = 'symbol_text',
-        preset = 'codicons',
+      require('luasnip.loaders.from_vscode').lazy_load()
+      require('luasnip.loaders.from_vscode').lazy_load({
+        paths = { vim.fn.stdpath('config') .. '/snippets' },
       })
-    end
+    end,
   },
+
+  -- nvim-cmp source compatibility shim for plugins that still register their
+  -- completion sources via the cmp API (cmp-conjure, crates.nvim).
   {
-    'hrsh7th/nvim-cmp',
+    'saghen/blink.compat',
+    version = '*',
+    lazy = true,
+    opts = {},
+  },
+
+  -- blink.cmp — fast Rust-based completion + cmdline + documentation popups.
+  {
+    'saghen/blink.cmp',
+    version = '*',
     dependencies = {
-      'hrsh7th/cmp-buffer',
-      'hrsh7th/cmp-path',
-      'hrsh7th/cmp-cmdline',
-      'onsails/lspkind.nvim',
+      'L3MON4D3/LuaSnip',
+      'rafamadriz/friendly-snippets',
+      'saghen/blink.compat',
     },
+    event = { 'InsertEnter', 'CmdlineEnter' },
     config = function()
-      local cmp = require("cmp")
-      local lspkind = require("lspkind")
-      local luasnip = require("luasnip")
+      -- ── C/C++ LSP filter ─────────────────────────────────────────────────
+      -- Drop clangd's own Snippet items (luasnip owns snippets) and qualified
+      -- items (`Foo::Bar`) when the user has NOT typed `::`. Kills the
+      -- `std::ranges::*` / `std::errc::*` flood when typing bare `re`; those
+      -- reappear once the user writes `std::re`, `ranges::re`, etc.
+      local CIK = vim.lsp.protocol.CompletionItemKind
+      local CPP_FTS = { c = true, cpp = true, objc = true, objcpp = true, cuda = true }
+      local function cpp_filter_lsp_items(items)
+        local col = vim.api.nvim_win_get_cursor(0)[2]
+        local line = vim.api.nvim_get_current_line()
+        local before = line:sub(1, col)
+        local user_tok = before:match('([%w_:]+)$') or ''
+        local user_qualified = user_tok:find('::', 1, true) ~= nil
 
-      local types = require('cmp.types')
-      local compare = cmp.config.compare
-
-      cmp.setup({
-        snippet = {
-          expand = function(args)
-            luasnip.lsp_expand(args.body)
-          end,
-        },
-        window = {
-          completion = cmp.config.window.bordered(),
-          documentation = cmp.config.window.bordered(),
-        },
-        completion = {
-          completeopt = 'menu,menuone,noselect',
-          autocomplete = { require('cmp.types').cmp.TriggerEvent.TextChanged },
-        },
-        sorting = {
-          priority_weight = 2,
-          comparators = {
-            -- 1. Exact prefix match first
-            compare.exact,
-            -- 2. Higher score (fuzzy match quality from LSP)
-            compare.score,
-            -- 3. Recently used completions
-            compare.recently_used,
-            -- 4. Nearby code locality (same scope/file)
-            compare.locality,
-            -- 5. Deprioritize Text completions
-            function(entry1, entry2)
-              local kind1 = entry1:get_kind()
-              local kind2 = entry2:get_kind()
-              local text_kind = types.lsp.CompletionItemKind.Text
-              if kind1 == text_kind and kind2 ~= text_kind then
-                return false
-              end
-              if kind1 ~= text_kind and kind2 == text_kind then
-                return true
-              end
-              return nil
-            end,
-            -- 6. Sort by completion kind
-            compare.kind,
-            -- 7. Shorter completions first
-            compare.length,
-            -- 8. Alphabetical tiebreaker
-            compare.sort_text,
-            compare.order,
-          },
-        },
-        formatting = {
-          fields = { "kind", "abbr", "menu" },
-          format = function(entry, vim_item)
-            local kind = lspkind.cmp_format({
-              mode = "symbol_text",
-              maxwidth = 50,
-            })(entry, vim_item)
-            local strings = vim.split(kind.kind, "%s", { trimempty = true })
-            kind.kind = " " .. (strings[1] or "") .. " "
-            kind.menu = "  " .. (strings[2] or "")
-            return kind
-          end,
-        },
-        mapping = cmp.mapping.preset.insert({
-          ['<C-b>'] = cmp.mapping.scroll_docs(-4),
-          ['<C-f>'] = cmp.mapping.scroll_docs(4),
-          ['<A-Space>'] = cmp.mapping.complete(),
-          -- Tab handled by Copilot (see copilot.vim config above)
-          ['<S-Tab>'] = cmp.mapping(function(fallback)
-            if cmp.visible() then
-              cmp.select_prev_item()
-            elseif luasnip.locally_jumpable(-1) then
-              luasnip.jump(-1)
-            else
-              fallback()
+        local out = {}
+        for _, item in ipairs(items) do
+          if item.kind ~= CIK.Snippet then
+            local qualifier = ''
+            if item.labelDetails and item.labelDetails.description then
+              qualifier = item.labelDetails.description
+            elseif item.detail then
+              qualifier = item.detail
             end
-          end, { "i", "s" }),
-          ['<CR>'] = cmp.mapping.confirm({ select = false }),
-          ['<A-h>'] = cmp.mapping.abort(),
-          -- Esc: закрыть popup И перейти в normal mode
-          ['<Esc>'] = cmp.mapping(function(fallback)
-            if cmp.visible() then
-              cmp.abort()
+            local label = item.label or ''
+            local is_qualified = qualifier:find('::', 1, true) ~= nil
+                              or label:find('::', 1, true) ~= nil
+            if user_qualified or not is_qualified then
+              out[#out + 1] = item
             end
-            vim.cmd("stopinsert")
-          end, { "i", "s" }),
-          ['<A-l>'] = cmp.mapping(function(fallback)
-            if cmp.visible() then
-              cmp.confirm({ select = true })
-            else
-              cmp.complete()
-            end
-          end, { "i", "s" }),
-          ['<A-j>'] = cmp.mapping.select_next_item(),
-          ['<A-k>'] = cmp.mapping.select_prev_item(),
-          ['<Down>'] = cmp.mapping.select_next_item(),
-          ['<Up>'] = cmp.mapping.select_prev_item(),
-        }),
-        sources = cmp.config.sources({
-          {
-            name = 'nvim_lsp',
-            priority = 1000,
-            entry_filter = function(entry)
-              return entry:get_kind() ~= 15
-            end,
-          },
-          { name = 'luasnip', priority = 750 },
-          { name = 'path', priority = 500 },
-        }, {
-          { name = 'buffer', priority = 250, keyword_length = 3 },
-        }),
-        experimental = {
-          ghost_text = false,
-        },
-      })
-
-      -- Clojure: добавляем conjure-источник (видит символы из живого nREPL,
-      -- включая то, что было подгружено через load-file / load — clojure-lsp
-      -- этого статически увидеть не может).
-      for _, ft in ipairs({ 'clojure', 'clojurescript', 'fennel' }) do
-        cmp.setup.filetype(ft, {
-          sources = cmp.config.sources({
-            { name = 'conjure', priority = 900 },
-            {
-              name = 'nvim_lsp',
-              priority = 1000,
-              entry_filter = function(entry)
-                return entry:get_kind() ~= 15
-              end,
-            },
-            { name = 'luasnip', priority = 750 },
-            { name = 'path',    priority = 500 },
-          }, {
-            { name = 'buffer', priority = 250, keyword_length = 3 },
-          }),
-        })
+          end
+        end
+        return out
       end
 
-      -- Prolog: без LSP (tuProlog-диалект). Источники: snippets, buffer
-      -- (предикаты из текущего файла), path.
-      cmp.setup.filetype('prolog', {
-        sources = cmp.config.sources({
-          { name = 'luasnip', priority = 750 },
-          { name = 'buffer',  priority = 500, keyword_length = 2 },
-          { name = 'path',    priority = 300 },
-        }),
-      })
+      require('blink.cmp').setup({
+        -- ── Keymap (mirrors the old nvim-cmp config) ───────────────────────
+        keymap = {
+          preset = 'none',
+          ['<A-Space>'] = { 'show', 'show_documentation', 'hide_documentation' },
+          ['<A-l>'] = { 'select_and_accept', 'show' },
+          ['<A-h>'] = { 'hide', 'fallback' },
+          ['<A-j>'] = { 'select_next', 'fallback' },
+          ['<A-k>'] = { 'select_prev', 'fallback' },
+          ['<Down>'] = { 'select_next', 'fallback' },
+          ['<Up>'] = { 'select_prev', 'fallback' },
+          ['<C-b>'] = { 'scroll_documentation_up', 'fallback' },
+          ['<C-f>'] = { 'scroll_documentation_down', 'fallback' },
 
-      cmp.setup.filetype('toml', {
-        sources = cmp.config.sources({
-          { name = 'crates' },
-          { name = 'nvim_lsp' },
-          { name = 'path' },
-        })
-      })
+          -- Enter: accept only if user explicitly selected an item; otherwise
+          -- pass through so <CR> still inserts a newline.
+          ['<CR>'] = { 'accept', 'fallback' },
 
-      cmp.setup.cmdline('/', {
-        mapping = cmp.mapping.preset.cmdline(),
-        sources = { { name = 'buffer' } }
-      })
+          -- Tab: Copilot suggestion (if any) wins; then snippet jump / select+
+          -- accept; finally fallback to a real tab character.
+          ['<Tab>'] = {
+            function(cmp)
+              if vim.g.copilot_enabled then
+                local ok, sug = pcall(vim.fn['copilot#GetDisplayedSuggestion'])
+                if ok and sug and sug.text and sug.text ~= '' then
+                  local keys = vim.fn['copilot#Accept']('')
+                  if keys and keys ~= '' then
+                    vim.api.nvim_feedkeys(keys, 'n', true)
+                    return true
+                  end
+                end
+              end
+              if cmp.is_visible() then
+                cmp.select_and_accept()
+                return true
+              end
+              return false
+            end,
+            'snippet_forward',
+            'fallback',
+          },
 
-      cmp.setup.cmdline(':', {
-        mapping = cmp.mapping.preset.cmdline(),
-        sources = cmp.config.sources(
-          { { name = 'path' } },
-          { { name = 'cmdline' } }
-        )
+          ['<S-Tab>'] = { 'snippet_backward', 'select_prev', 'fallback' },
+
+          -- Esc: close popup AND leave insert mode (single press).
+          ['<Esc>'] = {
+            function(cmp)
+              if cmp.is_visible() then cmp.hide() end
+              vim.schedule(function() vim.cmd('stopinsert') end)
+              return true
+            end,
+          },
+        },
+
+        snippets = { preset = 'luasnip' },
+
+        appearance = {
+          nerd_font_variant = 'mono',
+          use_nvim_cmp_as_default = false,
+        },
+
+        completion = {
+          -- Auto-add `()` after accepting a function — replaces the old
+          -- nvim-autopairs/cmp confirm_done bridge.
+          accept = {
+            auto_brackets = { enabled = true },
+          },
+          -- Don't auto-select the first item: <CR> must remain a real newline
+          -- unless the user explicitly picked something with <A-j>/<A-k>.
+          list = {
+            selection = { preselect = false, auto_insert = false },
+          },
+          menu = {
+            border = 'none',
+            scrollbar = false,
+            min_width = 20,
+            max_height = 12,
+            draw = {
+              treesitter = { 'lsp' },
+              padding = { 0, 1 },
+              gap = 1,
+              columns = {
+                { 'kind_icon' },
+                { 'label', 'label_description', gap = 1 },
+              },
+            },
+          },
+          documentation = {
+            auto_show = true,
+            auto_show_delay_ms = 200,
+            window = { border = 'none', max_width = 80 },
+          },
+          ghost_text = { enabled = false },
+        },
+
+        -- noice.nvim owns signature help.
+        signature = { enabled = false },
+
+        sources = {
+          default = { 'lsp', 'snippets', 'path', 'buffer' },
+          per_filetype = {
+            c       = { 'lsp', 'cpp_keywords', 'snippets', 'path', 'buffer' },
+            cpp     = { 'lsp', 'cpp_keywords', 'snippets', 'path', 'buffer' },
+            objc    = { 'lsp', 'cpp_keywords', 'snippets', 'path', 'buffer' },
+            objcpp  = { 'lsp', 'cpp_keywords', 'snippets', 'path', 'buffer' },
+            cuda    = { 'lsp', 'cpp_keywords', 'snippets', 'path', 'buffer' },
+            clojure       = { 'conjure', 'lsp', 'snippets', 'path', 'buffer' },
+            clojurescript = { 'conjure', 'lsp', 'snippets', 'path', 'buffer' },
+            fennel        = { 'conjure', 'lsp', 'snippets', 'path', 'buffer' },
+            prolog  = { 'snippets', 'buffer', 'path' },
+            toml    = { 'lsp', 'crates', 'path' },
+          },
+          providers = {
+            lsp = {
+              -- Run C/C++ flood-filter on clangd's items. No-op for everything
+              -- else — items pass through untouched.
+              transform_items = function(_, items)
+                if CPP_FTS[vim.bo.filetype] then
+                  return cpp_filter_lsp_items(items)
+                end
+                return items
+              end,
+            },
+            buffer = {
+              min_keyword_length = 3,
+              score_offset = -3,
+            },
+            snippets = {
+              score_offset = -1,
+            },
+            cpp_keywords = {
+              name = 'cpp_keywords',
+              module = 'lang.cpp_keywords',
+            },
+            -- cmp-conjure is a cmp source plugin; blink.compat wraps it.
+            conjure = {
+              name = 'conjure',
+              module = 'blink.compat.source',
+            },
+            -- crates.nvim registers a cmp source when completion.cmp.enabled
+            -- is set (see lua/plugins/rust.lua); blink.compat wraps it.
+            crates = {
+              name = 'crates',
+              module = 'blink.compat.source',
+            },
+          },
+        },
+
+        -- Trust blink's default scoring (prefix-match + case-match + frecency
+        -- + proximity). Frecency persists across sessions so frequently used
+        -- members naturally rise to the top.
+        fuzzy = {
+          implementation = 'prefer_rust_with_warning',
+        },
+
+        cmdline = {
+          enabled = true,
+          keymap = {
+            preset = 'cmdline',
+            ['<A-j>'] = { 'select_next', 'fallback' },
+            ['<A-k>'] = { 'select_prev', 'fallback' },
+            ['<A-l>'] = { 'select_and_accept' },
+            ['<A-h>'] = { 'hide', 'fallback' },
+            ['<A-Space>'] = { 'show', 'fallback' },
+          },
+          completion = {
+            menu = {
+              auto_show = function()
+                return vim.fn.getcmdtype() == ':'
+              end,
+            },
+            ghost_text = { enabled = false },
+          },
+        },
       })
-    end
-  }
+    end,
+  },
 }

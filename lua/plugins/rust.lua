@@ -5,7 +5,11 @@ return {
     lazy = false,
     init = function()
       vim.g.rustaceanvim = function()
-        local capabilities = require("cmp_nvim_lsp").default_capabilities()
+        local capabilities = vim.lsp.protocol.make_client_capabilities()
+        local ok_blink, blink = pcall(require, "blink.cmp")
+        if ok_blink and blink.get_lsp_capabilities then
+          capabilities = blink.get_lsp_capabilities(capabilities)
+        end
         capabilities.textDocument.completion.completionItem.snippetSupport = false
 
         local function path_exists(path)

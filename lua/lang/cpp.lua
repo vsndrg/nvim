@@ -29,16 +29,14 @@ function M.clangd_path()   return llvm_or_system("clangd") end
 function M.clang_format()  return llvm_or_system("clang-format") end
 function M.clang_tidy()    return llvm_or_system("clang-tidy") end
 
--- Build clangd capabilities. Pulls cmp_nvim_lsp if present.
+-- Build clangd capabilities. Pulls blink.cmp's enriched capabilities if present.
 -- snippetSupport=true so clangd returns function signatures with placeholders
--- ($1, $2, …) for cursor jumps; luasnip handles expansion via nvim-cmp.
+-- ($1, $2, …) for cursor jumps; luasnip handles expansion via blink.cmp.
 local function clangd_capabilities()
-  local caps
-  local ok, cmp_lsp = pcall(require, "cmp_nvim_lsp")
-  if ok then
-    caps = cmp_lsp.default_capabilities()
-  else
-    caps = vim.lsp.protocol.make_client_capabilities()
+  local caps = vim.lsp.protocol.make_client_capabilities()
+  local ok, blink = pcall(require, "blink.cmp")
+  if ok and blink.get_lsp_capabilities then
+    caps = blink.get_lsp_capabilities(caps)
   end
   caps.textDocument.completion.completionItem.snippetSupport = true
   caps.textDocument.completion.completionItem.resolveSupport = {
@@ -86,6 +84,8 @@ local function ensure_user_clangd_config()
     "Diagnostics:",
     "  UnusedIncludes: Strict",
     "  MissingIncludes: Strict",
+    "Completion:",
+    "  AllScopes: No",
     "",
   }, "\n")
   local f = io.open(cfg_file, "w")
@@ -103,12 +103,10 @@ function M.setup_server()
       M.clangd_path(),
       "--background-index",
       "--clang-tidy",
-      "--completion-style=detailed",
+      "--completion-style=bundled",
       "--function-arg-placeholders=true",
-      "--header-insertion=iwyu",
-      "--header-insertion-decorators",
+      "--header-insertion=never",
       "--fallback-style=LLVM",
-      "--all-scopes-completion",
       "--pch-storage=memory",
       "--cross-file-rename",
       "--enable-config",
@@ -118,7 +116,7 @@ function M.setup_server()
     capabilities = clangd_capabilities(),
     init_options = {
       usePlaceholders = true,
-      completeUnimported = true,
+      completeUnimported = false,
       clangdFileStatus = true,
     },
   })
@@ -634,50 +632,16 @@ function M.neotest_adapters()
 end
 
 -- ─────────────────────────────────────────────────────────────────────────────
--- cmp source list for C/C++. Includes treesitter so keywords (private, public,
--- noexcept, constexpr, …) and project identifiers come through even when
--- clangd doesn't propose them in the current context.
---
--- Other languages keep the global cmp config from lua/plugins/completions.lua.
--- ─────────────────────────────────────────────────────────────────────────────
-
-function M.setup_cmp_filetypes()
-  local ok, cmp = pcall(require, "cmp")
-  if not ok then return end
-
-  local sources_top = {
-    -- Filter out clangd's `Snippet` items (kind 15) — luasnip handles snippets.
-    { name = "nvim_lsp", priority = 1000,
-      entry_filter = function(entry) return entry:get_kind() ~= 15 end },
-    { name = "luasnip",    priority = 800 },
-    { name = "treesitter", priority = 600, keyword_length = 1 },
-    { name = "path",       priority = 500 },
-  }
-  local sources_fallback = {
-    { name = "buffer", priority = 250, keyword_length = 2 },
-  }
-
-  for _, ft in ipairs({ "c", "cpp", "objc", "objcpp", "cuda" }) do
-    cmp.setup.filetype(ft, {
-      sources = cmp.config.sources(sources_top, sources_fallback),
-    })
-  end
-end
-
--- ─────────────────────────────────────────────────────────────────────────────
 -- Public setup
 -- ─────────────────────────────────────────────────────────────────────────────
+--
+-- Completion sources for C/C++ (clangd LSP + cpp_keywords + luasnip + …) are
+-- wired up by lua/plugins/completions.lua via blink.cmp's per_filetype config.
+-- The keyword source itself lives in lua/lang/cpp_keywords.lua.
 
 function M.setup()
   M.setup_server()
   M.setup_autocmds()
-
-  -- cmp.setup.filetype is global, so it's safe to call once at startup
-  -- (nvim-cmp from completions.lua loads eagerly).
-  vim.api.nvim_create_autocmd("VimEnter", {
-    once = true,
-    callback = function() M.setup_cmp_filetypes() end,
-  })
 end
 
 return M

@@ -21,7 +21,11 @@ end
 local project_name = vim.fn.fnamemodify(root_dir, ":p:h:t")
 local workspace_dir = home .. "/.local/share/eclipse/" .. project_name
 
-local capabilities = require("cmp_nvim_lsp").default_capabilities()
+local capabilities = vim.lsp.protocol.make_client_capabilities()
+local ok_blink, blink = pcall(require, "blink.cmp")
+if ok_blink and blink.get_lsp_capabilities then
+  capabilities = blink.get_lsp_capabilities(capabilities)
+end
 
 -- Extended capabilities for code action support
 local extendedClientCapabilities = jdtls.extendedClientCapabilities

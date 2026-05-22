@@ -30,12 +30,14 @@ return {
     end,
   },
 
-  -- nvim-cmp source backed by the live nREPL: completes symbols pulled in
-  -- via (load-file ...) the moment they are evaluated.
+  -- Completion source backed by the live nREPL: completes symbols pulled in
+  -- via (load-file ...) the moment they are evaluated. The plugin registers
+  -- itself as an nvim-cmp source; blink.compat (loaded by completions.lua)
+  -- provides the cmp API shim so it works under blink.cmp.
   {
     "PaterJason/cmp-conjure",
     ft = conjure_fts,
-    dependencies = { "Olical/conjure", "hrsh7th/nvim-cmp" },
+    dependencies = { "Olical/conjure", "saghen/blink.compat" },
   },
 
   -- Parinfer (Rust): keep parens balanced via indentation.

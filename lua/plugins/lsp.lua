@@ -31,8 +31,14 @@ return {
     "neovim/nvim-lspconfig",
     lazy = false,
     config = function()
-      local capabilities = require('cmp_nvim_lsp').default_capabilities()
-      -- Отключаем snippet support — LSP будет отдавать plain completions без плейсхолдеров
+      -- LSP capabilities are sourced from blink.cmp when available so servers
+      -- get the completion features blink advertises (resolveSupport, etc.).
+      local capabilities = vim.lsp.protocol.make_client_capabilities()
+      local ok_blink, blink = pcall(require, 'blink.cmp')
+      if ok_blink and blink.get_lsp_capabilities then
+        capabilities = blink.get_lsp_capabilities(capabilities)
+      end
+      -- Disable snippet support — LSP returns plain completions without placeholders
       capabilities.textDocument.completion.completionItem.snippetSupport = false
 
       -- replace deprecated require("lspconfig") usage with a tiny shim that forwards
