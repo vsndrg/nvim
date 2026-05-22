@@ -83,6 +83,17 @@ km.set('n', '<leader>i', function()
   vim.lsp.inlay_hint.enable(not vim.lsp.inlay_hint.is_enabled())
 end, { desc = 'Toggle inlay hints' })
 
+-- Toggle statusline visibility
+km.set('n', '<leader>u', function()
+  if vim.o.laststatus ~= 0 then
+    vim.o.laststatus = 0
+    vim.o.cmdheight  = 0
+  else
+    vim.o.laststatus = 2
+    vim.o.cmdheight  = 1
+  end
+end, { desc = 'Toggle statusline' })
+
 -- Markview bindings (only for markdown files)
 vim.api.nvim_create_autocmd("FileType", {
   pattern = "markdown",

@@ -44,15 +44,29 @@ if java_debug_bundle ~= "" then
   table.insert(bundles, java_debug_bundle)
 end
 
--- java-test (for running JUnit tests)
-local java_test_path = mason_path .. "/java-test/extension/server/*.jar"
+-- java-test (for running JUnit tests). jdtls only accepts OSGi bundles here;
+-- the rest of `server/` ships non-OSGi fat jars (runner / jacocoagent / junit-*)
+-- — feeding those to jdtls aborts the bundle loader and corrupts the workspace
+-- (root cause of the "Failed to load extension bundles" + OOM spam in lsp.log).
+local java_test_path = mason_path .. "/java-test/extension/server/com.microsoft.java.test.plugin-*.jar"
 local java_test_bundles = vim.split(vim.fn.glob(java_test_path, true), "\n")
 if java_test_bundles[1] ~= "" then
   vim.list_extend(bundles, java_test_bundles)
 end
 
 local config = {
-  cmd = { "jdtls", "-data", workspace_dir },
+  -- jdtls launches with only `-Xms1G` from the wrapper; max heap defaults to
+  -- the JVM ergonomic value, which is too low for projects that span several
+  -- packages under one workspace. When the workspace index grows past that
+  -- ceiling jdtls throws OutOfMemoryError mid-load, marks the index broken,
+  -- rebuilds it, and OOMs again on the next launch — the cursor freezes
+  -- while nvim waits on LSP responses from a GC-thrashing server.
+  cmd = {
+    "jdtls",
+    "--jvm-arg=-Xmx2G",
+    "--jvm-arg=-XX:+UseG1GC",
+    "-data", workspace_dir,
+  },
   root_dir = root_dir,
   capabilities = capabilities,
 

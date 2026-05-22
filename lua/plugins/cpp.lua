@@ -209,7 +209,7 @@ return {
     end,
   },
 
-  -- Note: C/C++ keyword completion is provided by lua/lang/cpp_keywords.lua
+  -- Note: C/C++ keyword completion comes from lua/lang/cpp_keywords.lua
   -- (a native blink.cmp source). Signature help is owned by noice.nvim.
   --
   -- Note: nvim-dap C/C++ configuration is registered from lang/cpp.lua via

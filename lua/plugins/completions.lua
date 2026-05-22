@@ -66,33 +66,23 @@ return {
     },
     event = { 'InsertEnter', 'CmdlineEnter' },
     config = function()
-      -- ── C/C++ LSP filter ─────────────────────────────────────────────────
-      -- Drop clangd's own Snippet items (luasnip owns snippets) and qualified
-      -- items (`Foo::Bar`) when the user has NOT typed `::`. Kills the
-      -- `std::ranges::*` / `std::errc::*` flood when typing bare `re`; those
-      -- reappear once the user writes `std::re`, `ranges::re`, etc.
-      local CIK = vim.lsp.protocol.CompletionItemKind
-      local CPP_FTS = { c = true, cpp = true, objc = true, objcpp = true, cuda = true }
-
-      -- True if cursor is inside a comment or string node (treesitter).
-      -- Used to suppress keyword/snippet noise where it doesn't belong.
+      -- Treesitter check: cursor is inside a comment or string node.
+      -- Used as blink's top-level `enabled` guard so every source falls
+      -- silent inside `// …` / `/* … */` / `"…"` regions — blink has no
+      -- built-in context awareness for this.
       local function in_comment_or_string()
         local ok, node = pcall(vim.treesitter.get_node)
         if not ok or not node then return false end
         local t = node:type()
-        return t == 'comment'
-            or t == 'line_comment'
-            or t == 'block_comment'
-            or t == 'string_literal'
-            or t == 'raw_string_literal'
-            or t == 'string'
+        return t == 'comment' or t == 'line_comment' or t == 'block_comment'
+            or t == 'string'  or t == 'string_literal' or t == 'raw_string_literal'
             or t:find('comment$') ~= nil
       end
 
-      -- True right after a member/scope-access operator (`.`, `->`, `::`).
-      -- Only identifiers are grammatically valid in this position, so
-      -- keyword / snippet sources have no business here — they'd interleave
-      -- with the LSP's member list and break grouping.
+      -- Line-prefix check: cursor right after `.`, `->`, or `::`.
+      -- Only identifiers are grammatically valid here, so keyword + snippet
+      -- sources must stay quiet — otherwise they interleave with clangd's
+      -- member list and break grouping.
       local function after_member_access_op()
         local col = vim.api.nvim_win_get_cursor(0)[2]
         local before = vim.api.nvim_get_current_line():sub(1, col)
@@ -101,40 +91,10 @@ return {
             or before:match('::[%w_]*$') ~= nil
       end
 
-      -- Single predicate for "is this a context where keyword-like sources
-      -- (cpp_keywords, snippets) should fire?". Combines both rules above.
-      local function keyword_context()
-        return not in_comment_or_string() and not after_member_access_op()
-      end
-
-      local function cpp_filter_lsp_items(items)
-        local col = vim.api.nvim_win_get_cursor(0)[2]
-        local line = vim.api.nvim_get_current_line()
-        local before = line:sub(1, col)
-        local user_tok = before:match('([%w_:]+)$') or ''
-        local user_qualified = user_tok:find('::', 1, true) ~= nil
-
-        local out = {}
-        for _, item in ipairs(items) do
-          if item.kind ~= CIK.Snippet then
-            -- Look up the scope ONLY in labelDetails.description — that's the
-            -- official LSP slot ("std::" for std-namespaced items). Do NOT
-            -- fall back to item.detail: that's the type signature (e.g.
-            -- "std::ostream &" for a local named `os`), and using it as a
-            -- qualifier wrongly drops every local with an std-typed value.
-            local desc  = item.labelDetails and item.labelDetails.description or ''
-            local label = item.label or ''
-            local is_qualified = desc:find('::', 1, true) ~= nil
-                              or label:find('::', 1, true) ~= nil
-            if user_qualified or not is_qualified then
-              out[#out + 1] = item
-            end
-          end
-        end
-        return out
-      end
-
       require('blink.cmp').setup({
+        -- Single switch silences every source inside comments / strings.
+        enabled = function() return not in_comment_or_string() end,
+
         -- ── Keymap (mirrors the old nvim-cmp config) ───────────────────────
         keymap = {
           preset = 'none',
@@ -208,16 +168,27 @@ return {
           },
           menu = {
             border = 'none',
-            scrollbar = false,
+            scrollbar = true,
             min_width = 20,
             max_height = 12,
             draw = {
               treesitter = { 'lsp' },
               padding = { 0, 1 },
               gap = 1,
+              -- Drop blink's default `~` suffix on snippet labels.
+              snippet_indicator = '',
               columns = {
                 { 'kind_icon' },
                 { 'label', 'label_description', gap = 1 },
+              },
+              components = {
+                -- clangd возвращает некоторые items с ведущим пробелом
+                -- (context-sensitive padding) — выравниваем все labels по левому краю.
+                label = {
+                  text = function(ctx)
+                    return (ctx.label:gsub('^%s+', '')) .. ctx.label_detail
+                  end,
+                },
               },
             },
           },
@@ -243,32 +214,25 @@ return {
             clojure       = { 'conjure', 'lsp', 'snippets', 'path', 'buffer' },
             clojurescript = { 'conjure', 'lsp', 'snippets', 'path', 'buffer' },
             fennel        = { 'conjure', 'lsp', 'snippets', 'path', 'buffer' },
-            prolog  = { 'snippets', 'buffer', 'path' },
-            toml    = { 'lsp', 'crates', 'path' },
+            prolog        = { 'snippets', 'buffer', 'path' },
+            toml          = { 'lsp', 'crates', 'path' },
           },
           providers = {
-            lsp = {
-              -- Run C/C++ flood-filter on clangd's items. No-op for everything
-              -- else — items pass through untouched.
-              transform_items = function(_, items)
-                if CPP_FTS[vim.bo.filetype] then
-                  return cpp_filter_lsp_items(items)
-                end
-                return items
-              end,
-            },
             buffer = {
               min_keyword_length = 3,
               score_offset = -3,
             },
             snippets = {
               score_offset = -1,
-              enabled = keyword_context,
+              enabled = function() return not after_member_access_op() end,
             },
+            -- C/C++ language-keyword source: emits `kind = Keyword` items
+            -- (plain autocomplete entries, no snippet expansion). Source code
+            -- lives in lua/lang/cpp_keywords.lua and self-gates by filetype.
             cpp_keywords = {
               name = 'cpp_keywords',
               module = 'lang.cpp_keywords',
-              enabled = keyword_context,
+              enabled = function() return not after_member_access_op() end,
             },
             -- cmp-conjure is a cmp source plugin; blink.compat wraps it.
             conjure = {
@@ -311,6 +275,14 @@ return {
           },
         },
       })
+
+      -- Gutter is a separate floating window with Normal:BlinkCmpScrollBarGutter.
+      -- Link it to BlinkCmpMenu so it blends with the popup background.
+      local function hide_scrollbar_gutter()
+        vim.api.nvim_set_hl(0, 'BlinkCmpScrollBarGutter', { link = 'BlinkCmpMenu' })
+      end
+      hide_scrollbar_gutter()
+      vim.api.nvim_create_autocmd('ColorScheme', { callback = hide_scrollbar_gutter })
     end,
   },
 }

@@ -2,10 +2,17 @@
 -- -- Auto Commands
 -- -- ===============
 
--- Автоудаление терминального буфера когда процесс завершился
+-- Автоудаление терминального буфера когда процесс завершился.
+-- vim.schedule, чтобы избежать reentrant-удаления: TermClose вызывается
+-- из контекста, где буфер уже "in use" (напр. изнутри :%bw! при восстановлении
+-- сессии auto-session'ом). Прямой nvim_buf_delete оттуда даёт E937 на [No Name].
 vim.api.nvim_create_autocmd("TermClose", {
   callback = function(ev)
-    pcall(vim.api.nvim_buf_delete, ev.buf, { force = true })
+    vim.schedule(function()
+      if vim.api.nvim_buf_is_valid(ev.buf) then
+        pcall(vim.api.nvim_buf_delete, ev.buf, { force = true })
+      end
+    end)
   end,
 })
 
@@ -79,4 +86,17 @@ vim.api.nvim_create_autocmd({ "BufEnter", "WinEnter" }, {
 --     vim.cmd("Neotree toggle filesystem left")
 --   end
 -- })
+
+if vim.g.neovide then
+  vim.api.nvim_create_autocmd("FocusGained", {
+    callback = function()
+      vim.fn.system("sketchybar --bar hidden=true")
+    end,
+  })
+  vim.api.nvim_create_autocmd({ "FocusLost", "VimLeave" }, {
+    callback = function()
+      vim.fn.system("sketchybar --bar hidden=false")
+    end,
+  })
+end
 

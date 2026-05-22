@@ -21,7 +21,7 @@ local CPP_BASE_KEYWORDS = {
   -- access
   "private", "public", "protected",
   -- declarations
-  "class", "struct", "union", "enum", "namespace", "using", "typedef",
+  "namespace", "using", "typedef",
   "template", "typename", "friend", "virtual", "override", "final",
   "explicit", "noexcept",
   -- modern C++ (20/23)
