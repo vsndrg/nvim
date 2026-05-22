@@ -1,9 +1,12 @@
--- blink.cmp source providing C / C++ language keywords.
+-- blink.cmp source providing C / C++ language keywords that clangd does NOT
+-- reliably emit as completion candidates (control flow, exceptions, access
+-- specifiers, declaration keywords, modern C++ tokens, casts).
 --
--- Surfaces them as CompletionItemKind.Keyword so the global IDE-style ranking
--- (kind_weight: Keyword=4) puts them above clangd's index-derived Variables and
--- Functions. clangd does not reliably emit `for`, `private`, etc. as completion
--- candidates in all contexts; this source guarantees they always show up.
+-- Builtin types (`void`, `int`, `bool`, …) and type qualifiers (`const`,
+-- `volatile`, `static`, …) are intentionally NOT listed here — clangd already
+-- emits those, and including them would produce duplicate entries.
+--
+-- Items are emitted as CompletionItemKind.Keyword for the correct icon.
 
 local CPP_BASE_KEYWORDS = {
   -- control flow
@@ -15,9 +18,6 @@ local CPP_BASE_KEYWORDS = {
   "true", "false", "this", "nullptr",
   -- operators / type ops
   "sizeof", "alignof", "alignas", "new", "delete", "operator", "decltype",
-  -- type qualifiers / storage
-  "const", "volatile", "mutable", "static", "extern", "inline", "constexpr",
-  "thread_local", "auto", "register",
   -- access
   "private", "public", "protected",
   -- declarations
@@ -29,10 +29,6 @@ local CPP_BASE_KEYWORDS = {
   "import", "export", "module", "requires", "concept",
   -- casts
   "static_cast", "dynamic_cast", "const_cast", "reinterpret_cast",
-  -- builtin types
-  "bool", "char", "char8_t", "char16_t", "char32_t", "wchar_t",
-  "short", "int", "long", "float", "double", "signed", "unsigned", "void",
-  "size_t", "ptrdiff_t", "nullptr_t",
 }
 
 local C_BASE_KEYWORDS = {
@@ -40,11 +36,7 @@ local C_BASE_KEYWORDS = {
   "break", "continue", "return", "goto",
   "true", "false", "NULL",
   "sizeof", "alignof", "_Alignof", "_Alignas",
-  "const", "volatile", "restrict", "static", "extern", "inline", "auto",
-  "register", "_Thread_local", "_Atomic", "_Noreturn",
   "struct", "union", "enum", "typedef",
-  "bool", "_Bool", "char", "short", "int", "long", "float", "double",
-  "signed", "unsigned", "void", "size_t", "ptrdiff_t",
 }
 
 local KEYWORD_KIND = vim.lsp.protocol.CompletionItemKind.Keyword
