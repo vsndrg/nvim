@@ -73,6 +73,40 @@ return {
       -- reappear once the user writes `std::re`, `ranges::re`, etc.
       local CIK = vim.lsp.protocol.CompletionItemKind
       local CPP_FTS = { c = true, cpp = true, objc = true, objcpp = true, cuda = true }
+
+      -- True if cursor is inside a comment or string node (treesitter).
+      -- Used to suppress keyword/snippet noise where it doesn't belong.
+      local function in_comment_or_string()
+        local ok, node = pcall(vim.treesitter.get_node)
+        if not ok or not node then return false end
+        local t = node:type()
+        return t == 'comment'
+            or t == 'line_comment'
+            or t == 'block_comment'
+            or t == 'string_literal'
+            or t == 'raw_string_literal'
+            or t == 'string'
+            or t:find('comment$') ~= nil
+      end
+
+      -- True right after a member/scope-access operator (`.`, `->`, `::`).
+      -- Only identifiers are grammatically valid in this position, so
+      -- keyword / snippet sources have no business here — they'd interleave
+      -- with the LSP's member list and break grouping.
+      local function after_member_access_op()
+        local col = vim.api.nvim_win_get_cursor(0)[2]
+        local before = vim.api.nvim_get_current_line():sub(1, col)
+        return before:match('%.[%w_]*$') ~= nil
+            or before:match('%->[%w_]*$') ~= nil
+            or before:match('::[%w_]*$') ~= nil
+      end
+
+      -- Single predicate for "is this a context where keyword-like sources
+      -- (cpp_keywords, snippets) should fire?". Combines both rules above.
+      local function keyword_context()
+        return not in_comment_or_string() and not after_member_access_op()
+      end
+
       local function cpp_filter_lsp_items(items)
         local col = vim.api.nvim_win_get_cursor(0)[2]
         local line = vim.api.nvim_get_current_line()
@@ -83,14 +117,14 @@ return {
         local out = {}
         for _, item in ipairs(items) do
           if item.kind ~= CIK.Snippet then
-            local qualifier = ''
-            if item.labelDetails and item.labelDetails.description then
-              qualifier = item.labelDetails.description
-            elseif item.detail then
-              qualifier = item.detail
-            end
+            -- Look up the scope ONLY in labelDetails.description — that's the
+            -- official LSP slot ("std::" for std-namespaced items). Do NOT
+            -- fall back to item.detail: that's the type signature (e.g.
+            -- "std::ostream &" for a local named `os`), and using it as a
+            -- qualifier wrongly drops every local with an std-typed value.
+            local desc  = item.labelDetails and item.labelDetails.description or ''
             local label = item.label or ''
-            local is_qualified = qualifier:find('::', 1, true) ~= nil
+            local is_qualified = desc:find('::', 1, true) ~= nil
                               or label:find('::', 1, true) ~= nil
             if user_qualified or not is_qualified then
               out[#out + 1] = item
@@ -229,10 +263,12 @@ return {
             },
             snippets = {
               score_offset = -1,
+              enabled = keyword_context,
             },
             cpp_keywords = {
               name = 'cpp_keywords',
               module = 'lang.cpp_keywords',
+              enabled = keyword_context,
             },
             -- cmp-conjure is a cmp source plugin; blink.compat wraps it.
             conjure = {
