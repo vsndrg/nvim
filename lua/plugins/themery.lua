@@ -49,6 +49,40 @@ return {
     "zaldih/themery.nvim",
     lazy = false,
     config = function()
+      -- vscode.nvim makes Pmenu / BlinkCmpMenu blend into the editor bg, so
+      -- the completion popup is hard to see. Lift it to VS Code's actual menu
+      -- bg (#252526 dark / #f3f3f3 light) and use VS Code's selection blue.
+      -- Both Pmenu (builtin ins-completion-menu) and the BlinkCmpMenu* groups
+      -- (blink.cmp's own popup) are set so all popups stay consistent.
+      --
+      -- IMPORTANT: this autocmd MUST be registered before themery.setup(),
+      -- because themery.setup() restores the persisted theme synchronously
+      -- (firing ColorScheme during setup). If we registered after, the event
+      -- would fire before we listened.
+      local function tweak_vscode_popups()
+        local pmenu, sel, thumb
+        if vim.o.background == "light" then
+          pmenu, sel, thumb = "#e8e8e8", "#cce5ff", "#bdbdbd"
+        else
+          pmenu, sel, thumb = "#2d2d30", "#0a5a8a", "#5a5a5d"
+        end
+        vim.api.nvim_set_hl(0, "Pmenu",                 { bg = pmenu })
+        vim.api.nvim_set_hl(0, "PmenuSel",              { bg = sel })
+        vim.api.nvim_set_hl(0, "PmenuThumb",            { bg = thumb })
+        vim.api.nvim_set_hl(0, "BlinkCmpMenu",          { bg = pmenu })
+        vim.api.nvim_set_hl(0, "BlinkCmpMenuBorder",    { bg = pmenu })
+        vim.api.nvim_set_hl(0, "BlinkCmpMenuSelection", { bg = sel })
+        vim.api.nvim_set_hl(0, "BlinkCmpDoc",           { bg = pmenu })
+        vim.api.nvim_set_hl(0, "BlinkCmpDocBorder",     { bg = pmenu })
+      end
+      vim.api.nvim_create_autocmd("ColorScheme", {
+        pattern = "vscode",
+        callback = tweak_vscode_popups,
+      })
+      -- If vscode is already the active colorscheme by the time this plugin
+      -- loads, the ColorScheme event has already fired — apply once now.
+      if vim.g.colors_name == "vscode" then tweak_vscode_popups() end
+
       require("themery").setup({
         livePreview = true,
         themes = {
