@@ -424,6 +424,12 @@ function handlers.blur(s, msg)
   end
 end
 
+function handlers.benchResult(_, msg)
+  vim.g.mdpreview_bench = msg
+  vim.notify(("mdpreview: %d fps (median %.1f ms, p95 %.1f ms, max %.1f ms, %d frames)"):format(
+    msg.fps, msg.median, msg.p95, msg.max, msg.frames))
+end
+
 function handlers.toggleTask(s, msg)
   toggle_task(s, msg.line)
 end
@@ -782,6 +788,11 @@ function M.setup()
       end
     elseif sub == "close" then
       M.close()
+    elseif sub == "bench" then
+      local s = current_session()
+      if s then
+        post(s, { type = "bench" })
+      end
     elseif sub == "theme" then
       M.set_theme(args[2] or "next")
     else

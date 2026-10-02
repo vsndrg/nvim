@@ -1,33 +1,3 @@
-From e77efacc2a69b8b32d23bff7d278aa5d99f2636a Mon Sep 17 00:00:00 2001
-From: Egor Denisov <vsndrg@gmail.com>
-Date: Fri, 2 Oct 2026 20:58:28 +0300
-Subject: [PATCH] macos: embed native webviews over Nvim windows
- (neovide.webview)
-
-Add a neovide.webview Lua API that overlays a WKWebView on the pixel
-rect of an Nvim window (by winid). The webview follows the window every
-frame, is hidden while the window is not displayed, and is masked where
-floating windows cover it. Page script talks to Nvim through
-window.webkit.messageHandlers.neovide / window.neovideReceive.
-
-win_pos now carries the window handle down to RenderedWindow so grids
-can be matched to Nvim window ids.
----
- Cargo.lock                      |  15 ++
- Cargo.toml                      |  17 ++
- lua/init.lua                    |  47 ++++
- src/bridge/events.rs            |  32 ++-
- src/bridge/handler.rs           |  27 ++-
- src/bridge/ui_commands.rs       |   6 +
- src/editor/mod.rs               |  17 +-
- src/platform/macos/mod.rs       |  28 +++
- src/platform/macos/webview.rs   | 415 ++++++++++++++++++++++++++++++++
- src/renderer/rendered_window.rs |   8 +
- src/window/mod.rs               |  12 +
- src/window/window_wrapper.rs    |  47 ++++
- 12 files changed, 665 insertions(+), 6 deletions(-)
- create mode 100644 src/platform/macos/webview.rs
-
 diff --git a/Cargo.lock b/Cargo.lock
 index 8bf2e5d..dde7c9f 100644
 --- a/Cargo.lock
@@ -397,10 +367,10 @@ index cba9ade..208d049 100644
          let mut macos_window_feature = macos_window_feature;
 diff --git a/src/platform/macos/webview.rs b/src/platform/macos/webview.rs
 new file mode 100644
-index 0000000..825b7b3
+index 0000000..933207c
 --- /dev/null
 +++ b/src/platform/macos/webview.rs
-@@ -0,0 +1,415 @@
+@@ -0,0 +1,450 @@
 +//! Native WKWebViews overlaid on Nvim windows.
 +//!
 +//! Nvim (through `neovide.webview.*`) asks for a webview bound to a window handle (`winid`).
@@ -637,6 +607,9 @@ index 0000000..825b7b3
 +        let handler = WebviewMessageHandler::new(mtm, id, neovim_handler.clone(), ns_window);
 +        let view = unsafe {
 +            let configuration = WKWebViewConfiguration::new(mtm);
++            // WebKit throttles page rendering updates (rAF, scroll commits) to ~60 fps even on
++            // 120 Hz displays unless this feature flag is off.
++            set_webkit_feature(&configuration, "PreferPageRenderingUpdatesNear60FPSEnabled", false);
 +            configuration.userContentController().addScriptMessageHandler_name(
 +                ProtocolObject::from_ref(&*handler),
 +                &NSString::from_str(MESSAGE_HANDLER_NAME),
@@ -746,6 +719,38 @@ index 0000000..825b7b3
 +        }
 +        CATransaction::commit();
 +    }
++}
++
++/// Toggles a WebKit feature flag (the switches behind Safari's Feature Flags settings) through
++/// `+[WKPreferences _features]` / `-[WKPreferences _setEnabled:forFeature:]`. These are SPI;
++/// when they are missing the flag is left at its default.
++fn set_webkit_feature(configuration: &WKWebViewConfiguration, key: &str, enabled: bool) {
++    use objc2::runtime::{AnyClass, AnyObject, Sel};
++    use objc2::sel;
++    use objc2_foundation::NSArray;
++
++    let preferences = unsafe { configuration.preferences() };
++    let class: &AnyClass = preferences.class();
++    let features_sel: Sel = sel!(_features);
++    let set_sel: Sel = sel!(_setEnabled:forFeature:);
++    // `_features` is a class method: ask the class object, not its instances.
++    let has_api: bool = unsafe { msg_send![class, respondsToSelector: features_sel] }
++        && unsafe { msg_send![&*preferences, respondsToSelector: set_sel] };
++    if !has_api {
++        log::warn!("webview: WKPreferences feature SPI unavailable, cannot set {key}");
++        return;
++    }
++    let features: Retained<NSArray<AnyObject>> = unsafe { msg_send![class, _features] };
++    for feature in features.iter() {
++        let feature_key: Retained<NSString> = unsafe { msg_send![&*feature, key] };
++        if feature_key.to_string() == key {
++            unsafe {
++                let _: () = msg_send![&*preferences, _setEnabled: enabled, forFeature: &*feature];
++            }
++            return;
++        }
++    }
++    log::warn!("webview: WebKit feature {key} not found");
 +}
 +
 +fn load_file(view: &WKWebView, path: &str) {
@@ -955,6 +960,3 @@ index 822f584..94a333b 100644
 +        .collect();
 +    Some(crate::platform::macos::WebviewPlacement { region, occluders })
 +}
--- 
-2.50.1 (Apple Git-155)
-

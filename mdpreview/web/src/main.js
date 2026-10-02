@@ -425,6 +425,38 @@ document.addEventListener('keyup', (e) => {
 // A lost keyup (focus moved mid-hold) must not leave the page scrolling.
 window.addEventListener('blur', () => scroller.holdEnd());
 
+// Diagnostics: frame pacing of a 1 s held-key scroll (`:MdPreview bench`).
+function bench() {
+  const gaps = [];
+  let last = performance.now();
+  const start = last;
+  scroller.jumpTo(0);
+  setTimeout(() => {
+    scroller.holdStart(1);
+    const tick = (t) => {
+      gaps.push(t - last);
+      last = t;
+      if (t - start < 1300) {
+        requestAnimationFrame(tick);
+      } else {
+        scroller.holdEnd(1);
+        const g = gaps.slice(2).sort((a, b) => a - b);
+        const mean = g.reduce((a, b) => a + b, 0) / g.length;
+        post({
+          type: 'benchResult',
+          fps: Math.round(1000 / mean),
+          median: +g[g.length >> 1].toFixed(2),
+          p95: +g[Math.floor(g.length * 0.95)].toFixed(2),
+          max: +g[g.length - 1].toFixed(2),
+          frames: g.length,
+        });
+      }
+    };
+    last = performance.now();
+    requestAnimationFrame(tick);
+  }, 300);
+}
+
 // ------------------------------------------------------------ dispatcher
 
 function receive(msg) {
@@ -448,6 +480,9 @@ function receive(msg) {
     case 'cursor':
       state.cursorLine = msg.line;
       markActiveLine();
+      break;
+    case 'bench':
+      bench();
       break;
     case 'ownKeys':
       state.ownKeys = !!msg.enabled;
