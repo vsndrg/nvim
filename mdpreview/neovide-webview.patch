@@ -1,0 +1,960 @@
+From e77efacc2a69b8b32d23bff7d278aa5d99f2636a Mon Sep 17 00:00:00 2001
+From: Egor Denisov <vsndrg@gmail.com>
+Date: Fri, 2 Oct 2026 20:58:28 +0300
+Subject: [PATCH] macos: embed native webviews over Nvim windows
+ (neovide.webview)
+
+Add a neovide.webview Lua API that overlays a WKWebView on the pixel
+rect of an Nvim window (by winid). The webview follows the window every
+frame, is hidden while the window is not displayed, and is masked where
+floating windows cover it. Page script talks to Nvim through
+window.webkit.messageHandlers.neovide / window.neovideReceive.
+
+win_pos now carries the window handle down to RenderedWindow so grids
+can be matched to Nvim window ids.
+---
+ Cargo.lock                      |  15 ++
+ Cargo.toml                      |  17 ++
+ lua/init.lua                    |  47 ++++
+ src/bridge/events.rs            |  32 ++-
+ src/bridge/handler.rs           |  27 ++-
+ src/bridge/ui_commands.rs       |   6 +
+ src/editor/mod.rs               |  17 +-
+ src/platform/macos/mod.rs       |  28 +++
+ src/platform/macos/webview.rs   | 415 ++++++++++++++++++++++++++++++++
+ src/renderer/rendered_window.rs |   8 +
+ src/window/mod.rs               |  12 +
+ src/window/window_wrapper.rs    |  47 ++++
+ 12 files changed, 665 insertions(+), 6 deletions(-)
+ create mode 100644 src/platform/macos/webview.rs
+
+diff --git a/Cargo.lock b/Cargo.lock
+index 8bf2e5d..dde7c9f 100644
+--- a/Cargo.lock
++++ b/Cargo.lock
+@@ -1629,6 +1629,7 @@ dependencies = [
+  "objc2-foundation 0.3.2",
+  "objc2-metal 0.3.2",
+  "objc2-quartz-core 0.3.2",
++ "objc2-web-kit",
+  "parking_lot",
+  "rand 0.9.2",
+  "raw-window-handle",
+@@ -2209,6 +2210,20 @@ dependencies = [
+  "objc2-foundation 0.2.2",
+ ]
+ 
++[[package]]
++name = "objc2-web-kit"
++version = "0.3.2"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "b2e5aaab980c433cf470df9d7af96a7b46a9d892d521a2cbbb2f8a4c16751e7f"
++dependencies = [
++ "bitflags 2.10.0",
++ "block2 0.6.2",
++ "objc2 0.6.3",
++ "objc2-app-kit 0.3.2",
++ "objc2-core-foundation",
++ "objc2-foundation 0.3.2",
++]
++
+ [[package]]
+ name = "object"
+ version = "0.37.3"
+diff --git a/Cargo.toml b/Cargo.toml
+index 7397643..65ad6a7 100644
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -157,6 +157,7 @@ objc2-core-foundation = { version = "0.3.1", default-features = false, features
+ ] }
+ objc2-core-graphics = { version = "0.3.1", default-features = false, features = [
+   "CGColor",
++  "CGPath",
+   "CGDirectDisplay",
+ ] }
+ objc2-core-video = { version = "0.3.1", default-features = false, features = [
+@@ -174,6 +175,7 @@ objc2-foundation = { version = "0.3.1", default-features = false, features = [
+   "NSTimer",
+   "NSURL",
+   "NSUserDefaults",
++  "NSValue",
+   "std",
+ ] }
+ objc2-metal = { version = "0.3.1", default-features = false, features = [
+@@ -183,6 +185,7 @@ objc2-metal = { version = "0.3.1", default-features = false, features = [
+ ] }
+ objc2-quartz-core = { version = "0.3.1", default-features = false, features = [
+   "CALayer",
++  "CAShapeLayer",
+   "CAMetalLayer",
+   "CATransaction",
+   "objc2-core-foundation",
+@@ -190,6 +193,20 @@ objc2-quartz-core = { version = "0.3.1", default-features = false, features = [
+   "objc2-metal",
+   "std",
+ ] }
++objc2-web-kit = { version = "0.3.1", default-features = false, features = [
++  "WKFrameInfo",
++  "WKScriptMessage",
++  "WKScriptMessageHandler",
++  "WKUserContentController",
++  "WKWebView",
++  "WKWebViewConfiguration",
++  "WKPreferences",
++  "WKNavigation",
++  "block2",
++  "objc2-app-kit",
++  "objc2-core-foundation",
++  "std",
++] }
+ skia-safe = { version = "0.97.2", features = ["gl", "metal", "textlayout"] }
+ uzers = "0.12.1"
+ 
+diff --git a/lua/init.lua b/lua/init.lua
+index f906f9b..f8090b7 100644
+--- a/lua/init.lua
++++ b/lua/init.lua
+@@ -311,6 +311,53 @@ M.private.can_set_background = function()
+     end
+ end
+ 
++-- Native webviews overlaid on Nvim windows (macOS). A webview follows the window `winid`: it is
++-- moved with it every frame, hidden while the window is not displayed, and masked below floating
++-- windows. Page script receives messages through `window.neovideReceive(string)` and replies with
++-- `window.webkit.messageHandlers.neovide.postMessage(string)`, delivered to `on_message[id]`.
++M.webview = {
++    ---@type table<integer, fun(message: string)>
++    on_message = {},
++}
++
++---@param id integer caller-chosen identifier
++---@param winid integer window to cover
++---@param path string HTML file to load
++M.webview.open = function(id, winid, path)
++    pcall(rpcnotify, "neovide.webview.open", id, winid, path)
++end
++
++---@param id integer
++---@param winid integer
++M.webview.set_window = function(id, winid)
++    pcall(rpcnotify, "neovide.webview.set_window", id, winid)
++end
++
++---@param id integer
++---@param message string
++M.webview.post = function(id, message)
++    pcall(rpcnotify, "neovide.webview.post", id, message)
++end
++
++---@param id integer
++---@param focus boolean give keyboard focus to the webview (true) or back to Nvim (false)
++M.webview.focus = function(id, focus)
++    pcall(rpcnotify, "neovide.webview.focus", id, focus)
++end
++
++---@param id integer
++M.webview.close = function(id)
++    M.webview.on_message[id] = nil
++    pcall(rpcnotify, "neovide.webview.close", id)
++end
++
++M.private.webview_message = function(id, message)
++    local handler = M.webview.on_message[id]
++    if handler then
++        handler(message)
++    end
++end
++
+ M.disable_redraw = function()
+     -- Wrap inside pcall to avoid errors if Neovide disconnects
+     pcall(rpcnotify, "neovide.set_redraw", false)
+diff --git a/src/bridge/events.rs b/src/bridge/events.rs
+index 3b22383..80abcc3 100644
+--- a/src/bridge/events.rs
++++ b/src/bridge/events.rs
+@@ -311,6 +311,8 @@ pub enum RedrawEvent {
+     /// previously hidden, it should now be shown again.
+     WindowPosition {
+         grid: u64,
++        /// Nvim window handle (`winid`) shown in this grid.
++        window: Option<u64>,
+         start_row: u64,
+         start_column: u64,
+         width: u64,
+@@ -859,11 +861,11 @@ fn parse_grid_scroll(grid_scroll_arguments: Vec<Value>) -> Result<RedrawEvent> {
+ }
+ 
+ fn parse_win_pos(win_pos_arguments: Vec<Value>) -> Result<RedrawEvent> {
+-    let [grid, _window, start_row, start_column, width, height] =
+-        extract_values(win_pos_arguments)?;
++    let [grid, window, start_row, start_column, width, height] = extract_values(win_pos_arguments)?;
+ 
+     Ok(RedrawEvent::WindowPosition {
+         grid: parse_u64(grid)?,
++        window: parse_window_handle(&window),
+         start_row: parse_u64(start_row)?,
+         start_column: parse_u64(start_column)?,
+         width: parse_u64(width)?,
+@@ -871,6 +873,14 @@ fn parse_win_pos(win_pos_arguments: Vec<Value>) -> Result<RedrawEvent> {
+     })
+ }
+ 
++/// Decodes a `Window` msgpack ext value (a handle encoded as a msgpack integer).
++fn parse_window_handle(value: &Value) -> Option<u64> {
++    match value {
++        Value::Ext(_, bytes) => rmpv::decode::read_value(&mut bytes.as_slice()).ok()?.as_u64(),
++        value => value.as_u64(),
++    }
++}
++
+ fn parse_window_anchor(value: Value) -> Result<WindowAnchor> {
+     let value_str = parse_string(value)?;
+     match value_str.as_str() {
+@@ -1184,7 +1194,23 @@ pub fn parse_progress_bar_event(value: Option<&Value>) -> Option<UserEvent> {
+ mod tests {
+     use rmpv::Value;
+ 
+-    use super::{MessageKind, RedrawEvent, parse_msg_show};
++    use super::{MessageKind, RedrawEvent, parse_msg_show, parse_win_pos};
++
++    #[test]
++    fn win_pos_decodes_window_handle_ext() {
++        // Window handles arrive as msgpack ext values wrapping an integer (1000 = 0xcd 0x03 0xe8).
++        let window = Value::Ext(1, vec![0xcd, 0x03, 0xe8]);
++        let event = parse_win_pos(vec![
++            Value::from(2),
++            window,
++            Value::from(0),
++            Value::from(40),
++            Value::from(80),
++            Value::from(24),
++        ])
++        .unwrap();
++        assert!(matches!(event, RedrawEvent::WindowPosition { grid: 2, window: Some(1000), .. }));
++    }
+ 
+     #[test]
+     fn message_kind_marks_error_variants() {
+diff --git a/src/bridge/handler.rs b/src/bridge/handler.rs
+index 800e48b..32944ee 100644
+--- a/src/bridge/handler.rs
++++ b/src/bridge/handler.rs
+@@ -25,7 +25,7 @@ use crate::{
+     error_handling::ResultPanicExplanation,
+     running_tracker::RunningTracker,
+     settings::{FontConfigState, Settings},
+-    window::{EventPayload, RouteId, UserEvent, WindowCommand},
++    window::{EventPayload, RouteId, UserEvent, WebviewCommand, WindowCommand},
+ };
+ 
+ use super::ui_commands::UiCommand;
+@@ -286,6 +286,14 @@ impl Handler for NeovimHandler {
+                 }
+                 None => warn!("neovide.force_click called with invalid arguments: {arguments:?}"),
+             },
++            name if name.starts_with("neovide.webview.") => {
++                match parse_webview_command(&name["neovide.webview.".len()..], &arguments) {
++                    Some(command) => {
++                        self.send_window_command(WindowCommand::Webview(command));
++                    }
++                    None => warn!("{name} called with invalid arguments: {arguments:?}"),
++                }
++            }
+             "neovide.exec_detach_handler" => {
+                 send_ui(ParallelCommand::Quit, self);
+             }
+@@ -345,6 +353,23 @@ fn parse_force_click_args(
+     Some((col, row, entity, guifont, kind))
+ }
+ 
++fn parse_webview_command(action: &str, arguments: &[Value]) -> Option<WebviewCommand> {
++    let id = arguments.first()?.as_u64()?;
++    let arg = |i: usize| arguments.get(i);
++    Some(match action {
++        "open" => WebviewCommand::Open {
++            id,
++            winid: arg(1)?.as_u64()?,
++            url: arg(2)?.as_str()?.to_string(),
++        },
++        "set_window" => WebviewCommand::SetWindow { id, winid: arg(1)?.as_u64()? },
++        "post" => WebviewCommand::Post { id, message: arg(1)?.as_str()?.to_string() },
++        "focus" => WebviewCommand::Focus { id, focus: arg(1)?.as_bool()? },
++        "close" => WebviewCommand::Close { id },
++        _ => return None,
++    })
++}
++
+ #[cfg(target_os = "macos")]
+ fn parse_document_state_args(arguments: &[Value]) -> Option<(String, bool)> {
+     let [path, modified, ..] = arguments else {
+diff --git a/src/bridge/ui_commands.rs b/src/bridge/ui_commands.rs
+index e2d3b46..5f29377 100644
+--- a/src/bridge/ui_commands.rs
++++ b/src/bridge/ui_commands.rs
+@@ -276,6 +276,7 @@ pub enum ParallelCommand {
+     SetBackground { background: String },
+     FlushStartupMessages { messages: Vec<StartupMessage> },
+     ReplayStartupMessages { messages: Vec<StartupMessage> },
++    WebviewMessage { id: u64, message: String },
+ }
+ 
+ async fn display_available_fonts(
+@@ -452,6 +453,11 @@ impl ParallelCommand {
+                 // We should go back to it whenever that bug gets fixed.
+                 show_error_message(nvim, &lines).await.context("ShowError failed")
+             }
++            ParallelCommand::WebviewMessage { id, message } => nvim
++                .exec_lua("neovide.private.webview_message(...)", call_args![id as i64, message])
++                .await
++                .map(|_| ())
++                .context("WebviewMessage failed"),
+             ParallelCommand::SetBackground { background } => {
+                 set_background_if_allowed(&background, nvim).await;
+                 Ok(())
+diff --git a/src/editor/mod.rs b/src/editor/mod.rs
+index b4e486a..4090413 100644
+--- a/src/editor/mod.rs
++++ b/src/editor/mod.rs
+@@ -368,9 +368,22 @@ impl Editor {
+                     );
+                 }
+             }
+-            RedrawEvent::WindowPosition { grid, start_row, start_column, width, height } => {
++            RedrawEvent::WindowPosition {
++                grid,
++                window,
++                start_row,
++                start_column,
++                width,
++                height,
++            } => {
+                 tracy_zone!("EditorWindowPosition");
+-                self.set_window_position(grid, start_column, start_row, width, height)
++                self.set_window_position(grid, start_column, start_row, width, height);
++                if let Some(window) = window {
++                    self.draw_command_batcher.queue(DrawCommand::Window {
++                        grid_id: grid,
++                        command: WindowDrawCommand::Handle(window),
++                    });
++                }
+             }
+             RedrawEvent::WindowFloatPosition {
+                 grid,
+diff --git a/src/platform/macos/mod.rs b/src/platform/macos/mod.rs
+index cba9ade..208d049 100644
+--- a/src/platform/macos/mod.rs
++++ b/src/platform/macos/mod.rs
+@@ -1,5 +1,9 @@
+ pub mod settings;
+ mod switcher;
++mod webview;
++
++use webview::WebviewManager;
++pub use webview::WebviewPlacement;
+ 
+ pub use switcher::{
+     EditorSwitcherRow, close_editor_switcher_if_open, editor_switcher_key_event_matches,
+@@ -351,9 +355,32 @@ pub struct MacosWindowFeature {
+     neovim_handler: NeovimHandler,
+     simple_fullscreen: bool,
+     has_transparent_titlebar: bool,
++    webviews: WebviewManager,
+ }
+ 
+ impl MacosWindowFeature {
++    pub fn handle_webview_command(&mut self, command: crate::window::WebviewCommand) {
++        use crate::window::WebviewCommand;
++        match command {
++            WebviewCommand::Open { id, winid, url } => {
++                self.webviews.open(&self.ns_window, &self.neovim_handler, id, winid, &url)
++            }
++            WebviewCommand::SetWindow { id, winid } => self.webviews.set_window(id, winid),
++            WebviewCommand::Post { id, message } => self.webviews.post(id, &message),
++            WebviewCommand::Focus { id, focus } => self.webviews.focus(&self.ns_window, id, focus),
++            WebviewCommand::Close { id } => self.webviews.close(&self.ns_window, id),
++        }
++    }
++
++    pub fn has_webviews(&self) -> bool {
++        !self.webviews.is_empty()
++    }
++
++    pub fn sync_webviews(&mut self, placement: impl Fn(u64) -> Option<WebviewPlacement>) {
++        let scale_factor = self.ns_window.backingScaleFactor();
++        self.webviews.sync(scale_factor, placement);
++    }
++
+     pub fn from_winit_window(
+         window: &Window,
+         settings: Arc<Settings>,
+@@ -439,6 +466,7 @@ impl MacosWindowFeature {
+             neovim_handler,
+             simple_fullscreen,
+             has_transparent_titlebar,
++            webviews: WebviewManager::default(),
+         };
+ 
+         let mut macos_window_feature = macos_window_feature;
+diff --git a/src/platform/macos/webview.rs b/src/platform/macos/webview.rs
+new file mode 100644
+index 0000000..825b7b3
+--- /dev/null
++++ b/src/platform/macos/webview.rs
+@@ -0,0 +1,415 @@
++//! Native WKWebViews overlaid on Nvim windows.
++//!
++//! Nvim (through `neovide.webview.*`) asks for a webview bound to a window handle (`winid`).
++//! Every frame the webview is moved onto that window's pixel rect, hidden when the window is not
++//! displayed, and masked where floating windows cover it, so the Nvim UI stays on top.
++//! Page script talks back through `window.webkit.messageHandlers.neovide.postMessage(string)`,
++//! which is forwarded to `neovide.private.webview_message(id, string)` in Nvim.
++
++use std::collections::HashMap;
++
++use glamour::Intersection;
++
++use objc2::{
++    DefinedClass, MainThreadOnly, define_class, msg_send,
++    rc::{Retained, Weak},
++    runtime::ProtocolObject,
++};
++use objc2_app_kit::{NSView, NSWindow};
++use objc2_core_graphics::CGMutablePath;
++use objc2_foundation::{
++    MainThreadMarker, NSNumber, NSObject, NSObjectProtocol, NSPoint, NSRect, NSSize, NSString,
++    NSURL, ns_string,
++};
++use objc2_quartz_core::{CAShapeLayer, CATransaction};
++use objc2_web_kit::{
++    WKScriptMessage, WKScriptMessageHandler, WKUserContentController, WKWebView,
++    WKWebViewConfiguration,
++};
++
++use crate::bridge::{NeovimHandler, ParallelCommand, send_ui};
++use crate::units::PixelRect;
++
++const MESSAGE_HANDLER_NAME: &str = "neovide";
++
++#[derive(Debug)]
++struct MessageHandlerIvars {
++    id: u64,
++    neovim_handler: NeovimHandler,
++    ns_window: Weak<NSWindow>,
++}
++
++define_class!(
++    #[derive(Debug)]
++    #[unsafe(super = NSObject)]
++    #[thread_kind = MainThreadOnly]
++    #[ivars = MessageHandlerIvars]
++    struct WebviewMessageHandler;
++
++    unsafe impl NSObjectProtocol for WebviewMessageHandler {}
++
++    unsafe impl WKScriptMessageHandler for WebviewMessageHandler {
++        #[unsafe(method(userContentController:didReceiveScriptMessage:))]
++        fn did_receive_script_message(
++            &self,
++            _controller: &WKUserContentController,
++            message: &WKScriptMessage,
++        ) {
++            let body = unsafe { message.body() };
++            let Ok(body) = body.downcast::<NSString>() else {
++                log::warn!("webview: ignoring non-string message");
++                return;
++            };
++            let body = body.to_string();
++            let ivars = self.ivars();
++            // Handing keyboard focus back must not wait for an Nvim round trip: the next key
++            // press would still land in the webview.
++            if message_type(&body).as_deref() == Some("blur")
++                && let Some(ns_window) = ivars.ns_window.load()
++            {
++                focus_nvim(&ns_window);
++            }
++            send_ui(
++                ParallelCommand::WebviewMessage { id: ivars.id, message: body },
++                &ivars.neovim_handler,
++            );
++        }
++    }
++);
++
++impl WebviewMessageHandler {
++    fn new(
++        mtm: MainThreadMarker,
++        id: u64,
++        neovim_handler: NeovimHandler,
++        ns_window: &NSWindow,
++    ) -> Retained<Self> {
++        let this = Self::alloc(mtm).set_ivars(MessageHandlerIvars {
++            id,
++            neovim_handler,
++            ns_window: Weak::from(ns_window),
++        });
++        unsafe { msg_send![super(this), init] }
++    }
++}
++
++fn message_type(body: &str) -> Option<String> {
++    let value: serde_json::Value = serde_json::from_str(body).ok()?;
++    Some(value.get("type")?.as_str()?.to_owned())
++}
++
++fn focus_nvim(ns_window: &NSWindow) {
++    if let Some(content_view) = ns_window.contentView() {
++        ns_window.makeFirstResponder(Some(&content_view));
++    }
++}
++
++/// Where a webview should be this frame, in physical pixels relative to the content view.
++pub struct WebviewPlacement {
++    pub region: PixelRect<f32>,
++    /// Regions of floating windows drawn above the target window.
++    pub occluders: Vec<PixelRect<f32>>,
++}
++
++#[derive(Debug)]
++struct Pane {
++    view: Retained<WKWebView>,
++    handler: Retained<WebviewMessageHandler>,
++    winid: u64,
++    frame: Option<NSRect>,
++    holes: Vec<NSRect>,
++}
++
++impl Pane {
++    fn set_hidden(&mut self, hidden: bool) {
++        if self.view.isHidden() != hidden {
++            self.view.setHidden(hidden);
++        }
++        if hidden {
++            self.frame = None;
++        }
++    }
++
++    fn place(&mut self, frame: NSRect, holes: Vec<NSRect>) {
++        if self.frame != Some(frame) {
++            self.view.setFrame(frame);
++            self.frame = Some(frame);
++            // The mask is in view coordinates; it depends on the size too.
++            self.holes.clear();
++            self.holes.push(NSRect::ZERO);
++        }
++        if self.holes != holes {
++            self.update_mask(frame.size, &holes);
++            self.holes = holes;
++        }
++        self.set_hidden(false);
++    }
++
++    fn update_mask(&self, size: NSSize, holes: &[NSRect]) {
++        let Some(layer) = self.view.layer() else {
++            return;
++        };
++        if holes.is_empty() {
++            unsafe { layer.setMask(None) };
++            return;
++        }
++        // Holes are in (flipped, y-down) view coordinates. A layer inside a flipped view
++        // hierarchy has flipped geometry (reported by contentsAreFlipped), so the path can use
++        // them as is; otherwise convert to the y-up layer space.
++        let flip = !layer.contentsAreFlipped();
++        let path = CGMutablePath::new();
++        for rect in subtract_rects(NSRect::new(NSPoint::ZERO, size), holes) {
++            let rect = if flip {
++                NSRect::new(
++                    NSPoint::new(rect.origin.x, size.height - rect.origin.y - rect.size.height),
++                    rect.size,
++                )
++            } else {
++                rect
++            };
++            unsafe { CGMutablePath::add_rect(Some(&path), std::ptr::null(), rect) };
++        }
++        let mask = CAShapeLayer::new();
++        mask.setFrame(NSRect::new(NSPoint::ZERO, size));
++        mask.setPath(Some(&path));
++        unsafe { layer.setMask(Some(&mask)) };
++    }
++}
++
++/// Splits `bounds` minus the union of `holes` into disjoint rectangles.
++fn subtract_rects(bounds: NSRect, holes: &[NSRect]) -> Vec<NSRect> {
++    let mut pieces = vec![bounds];
++    for hole in holes {
++        let mut next = Vec::with_capacity(pieces.len() + 4);
++        for piece in pieces {
++            let (px0, py0) = (piece.origin.x, piece.origin.y);
++            let (px1, py1) = (px0 + piece.size.width, py0 + piece.size.height);
++            let x0 = hole.origin.x.max(px0);
++            let y0 = hole.origin.y.max(py0);
++            let x1 = (hole.origin.x + hole.size.width).min(px1);
++            let y1 = (hole.origin.y + hole.size.height).min(py1);
++            if x0 >= x1 || y0 >= y1 {
++                next.push(piece);
++                continue;
++            }
++            let mut push = |x: f64, y: f64, w: f64, h: f64| {
++                if w > 0.0 && h > 0.0 {
++                    next.push(NSRect::new(NSPoint::new(x, y), NSSize::new(w, h)));
++                }
++            };
++            push(px0, py0, px1 - px0, y0 - py0); // above
++            push(px0, y1, px1 - px0, py1 - y1); // below
++            push(px0, y0, x0 - px0, y1 - y0); // left
++            push(x1, y0, px1 - x1, y1 - y0); // right
++        }
++        pieces = next;
++    }
++    pieces
++}
++
++#[derive(Debug, Default)]
++pub struct WebviewManager {
++    panes: HashMap<u64, Pane>,
++}
++
++impl WebviewManager {
++    pub fn open(
++        &mut self,
++        ns_window: &NSWindow,
++        neovim_handler: &NeovimHandler,
++        id: u64,
++        winid: u64,
++        url: &str,
++    ) {
++        let mtm = MainThreadMarker::new().expect("webviews must be created on the main thread");
++        if let Some(pane) = self.panes.get_mut(&id) {
++            pane.winid = winid;
++            load_file(&pane.view, url);
++            return;
++        }
++        let Some(content_view) = ns_window.contentView() else {
++            return;
++        };
++
++        let handler = WebviewMessageHandler::new(mtm, id, neovim_handler.clone(), ns_window);
++        let view = unsafe {
++            let configuration = WKWebViewConfiguration::new(mtm);
++            configuration.userContentController().addScriptMessageHandler_name(
++                ProtocolObject::from_ref(&*handler),
++                &NSString::from_str(MESSAGE_HANDLER_NAME),
++            );
++            let view = WKWebView::initWithFrame_configuration(
++                WKWebView::alloc(mtm),
++                NSRect::ZERO,
++                &configuration,
++            );
++            // Let the window background (drawn by Neovide) show until the page paints.
++            let _: () = msg_send![&view, setValue: &*NSNumber::new_bool(false), forKey: ns_string!("drawsBackground")];
++            view.setInspectable(true);
++            view
++        };
++        view.setWantsLayer(true);
++        view.setHidden(true);
++        content_view.addSubview(&view);
++        load_file(&view, url);
++
++        self.panes.insert(id, Pane { view, handler, winid, frame: None, holes: Vec::new() });
++    }
++
++    pub fn set_window(&mut self, id: u64, winid: u64) {
++        if let Some(pane) = self.panes.get_mut(&id) {
++            pane.winid = winid;
++        }
++    }
++
++    pub fn post(&self, id: u64, message: &str) {
++        let Some(pane) = self.panes.get(&id) else {
++            return;
++        };
++        // A JSON string literal is a valid JS string literal.
++        let literal = serde_json::to_string(message).unwrap_or_default();
++        let script = format!("window.neovideReceive && window.neovideReceive({literal})");
++        unsafe {
++            pane.view.evaluateJavaScript_completionHandler(&NSString::from_str(&script), None);
++        }
++    }
++
++    pub fn focus(&self, ns_window: &NSWindow, id: u64, focus: bool) {
++        match self.panes.get(&id) {
++            Some(pane) if focus => {
++                ns_window.makeFirstResponder(Some(&pane.view));
++            }
++            _ => focus_nvim(ns_window),
++        }
++    }
++
++    pub fn close(&mut self, ns_window: &NSWindow, id: u64) {
++        let Some(pane) = self.panes.remove(&id) else {
++            return;
++        };
++        let had_focus = ns_window
++            .firstResponder()
++            .is_some_and(|responder| is_descendant_responder(&responder, &pane.view));
++        unsafe {
++            pane.view
++                .configuration()
++                .userContentController()
++                .removeScriptMessageHandlerForName(&NSString::from_str(MESSAGE_HANDLER_NAME));
++        }
++        pane.view.removeFromSuperview();
++        drop(pane.handler);
++        if had_focus {
++            focus_nvim(ns_window);
++        }
++    }
++
++    pub fn is_empty(&self) -> bool {
++        self.panes.is_empty()
++    }
++
++    /// Moves every webview onto its window. `placement` resolves a `winid` to its current
++    /// region, or `None` when the window is not displayed.
++    pub fn sync(&mut self, scale_factor: f64, placement: impl Fn(u64) -> Option<WebviewPlacement>) {
++        if self.panes.is_empty() {
++            return;
++        }
++        let to_points = |rect: PixelRect<f32>| {
++            let size = rect.size();
++            NSRect::new(
++                NSPoint::new(rect.min.x as f64 / scale_factor, rect.min.y as f64 / scale_factor),
++                NSSize::new(size.width as f64 / scale_factor, size.height as f64 / scale_factor),
++            )
++        };
++        CATransaction::begin();
++        CATransaction::setDisableActions(true);
++        for pane in self.panes.values_mut() {
++            let Some(WebviewPlacement { region, occluders }) = placement(pane.winid) else {
++                pane.set_hidden(true);
++                continue;
++            };
++            let frame = to_points(region);
++            let holes = occluders
++                .into_iter()
++                .filter(|o| o.intersects(&region))
++                .map(|o| {
++                    let o = to_points(o);
++                    NSRect::new(
++                        NSPoint::new(o.origin.x - frame.origin.x, o.origin.y - frame.origin.y),
++                        o.size,
++                    )
++                })
++                .collect();
++            pane.place(frame, holes);
++        }
++        CATransaction::commit();
++    }
++}
++
++fn load_file(view: &WKWebView, path: &str) {
++    let url = NSURL::fileURLWithPath(&NSString::from_str(path));
++    // Read access to the whole file system: pages reference images next to the documents
++    // they render.
++    let root = NSURL::fileURLWithPath(ns_string!("/"));
++    unsafe {
++        let _ = view.loadFileURL_allowingReadAccessToURL(&url, &root);
++    }
++}
++
++fn is_descendant_responder(responder: &objc2_app_kit::NSResponder, view: &NSView) -> bool {
++    responder.downcast_ref::<NSView>().is_some_and(|responder| responder.isDescendantOf(view))
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++
++    fn rect(x: f64, y: f64, w: f64, h: f64) -> NSRect {
++        NSRect::new(NSPoint::new(x, y), NSSize::new(w, h))
++    }
++
++    fn area(rects: &[NSRect]) -> f64 {
++        rects.iter().map(|r| r.size.width * r.size.height).sum()
++    }
++
++    #[test]
++    fn subtract_no_holes_keeps_bounds() {
++        let bounds = rect(0.0, 0.0, 100.0, 50.0);
++        assert_eq!(subtract_rects(bounds, &[]), vec![bounds]);
++    }
++
++    #[test]
++    fn subtract_inner_hole() {
++        let pieces = subtract_rects(rect(0.0, 0.0, 100.0, 100.0), &[rect(10.0, 20.0, 30.0, 40.0)]);
++        assert_eq!(area(&pieces), 100.0 * 100.0 - 30.0 * 40.0);
++        assert_eq!(pieces.len(), 4);
++    }
++
++    #[test]
++    fn subtract_overlapping_holes_counts_union_once() {
++        let pieces = subtract_rects(
++            rect(0.0, 0.0, 100.0, 100.0),
++            &[rect(0.0, 0.0, 50.0, 50.0), rect(25.0, 25.0, 50.0, 50.0)],
++        );
++        // Union of the holes: 2 * 2500 - 625 overlap.
++        assert_eq!(area(&pieces), 10000.0 - (5000.0 - 625.0));
++    }
++
++    #[test]
++    fn subtract_hole_outside_is_ignored() {
++        let bounds = rect(0.0, 0.0, 10.0, 10.0);
++        assert_eq!(subtract_rects(bounds, &[rect(20.0, 20.0, 5.0, 5.0)]), vec![bounds]);
++    }
++
++    #[test]
++    fn subtract_covering_hole_leaves_nothing() {
++        assert!(
++            subtract_rects(rect(0.0, 0.0, 10.0, 10.0), &[rect(-1.0, -1.0, 20.0, 20.0)]).is_empty()
++        );
++    }
++
++    #[test]
++    fn message_type_parses_json() {
++        assert_eq!(message_type(r#"{"type":"blur","key":"j"}"#).as_deref(), Some("blur"));
++        assert_eq!(message_type("not json"), None);
++    }
++}
+diff --git a/src/renderer/rendered_window.rs b/src/renderer/rendered_window.rs
+index 7d2793d..e980532 100644
+--- a/src/renderer/rendered_window.rs
++++ b/src/renderer/rendered_window.rs
+@@ -67,6 +67,8 @@ pub enum WindowDrawCommand {
+         right: u64,
+     },
+     SortOrder(SortOrder),
++    /// The Nvim window handle (`winid`) displayed in this grid.
++    Handle(u64),
+ }
+ 
+ struct RenderedLine {
+@@ -86,6 +88,8 @@ struct TrailingFillRect {
+ 
+ pub struct RenderedWindow {
+     pub id: u64,
++    /// Nvim window handle (`winid`), known once a `win_pos` event arrived.
++    pub window_handle: Option<u64>,
+     valid: bool,
+     pub hidden: bool,
+     pub anchor_info: Option<AnchorInfo>,
+@@ -127,6 +131,7 @@ impl RenderedWindow {
+         let grid_position = GridPos::ZERO;
+         RenderedWindow {
+             id,
++            window_handle: None,
+             valid: false,
+             hidden: false,
+             anchor_info: None,
+@@ -739,6 +744,9 @@ impl RenderedWindow {
+                     anchor_info.sort_order = sort_order;
+                 }
+             }
++            WindowDrawCommand::Handle(handle) => {
++                self.window_handle = Some(handle);
++            }
+             _ => {}
+         };
+     }
+diff --git a/src/window/mod.rs b/src/window/mod.rs
+index 33bcfcc..39837d5 100644
+--- a/src/window/mod.rs
++++ b/src/window/mod.rs
+@@ -116,6 +116,17 @@ impl From<&str> for ForceClickKind {
+     }
+ }
+ 
++/// Native webviews overlaid on Nvim windows (`neovide.webview.*`). Each webview is identified by
++/// a caller-chosen `id` and follows the pixel rect of the Nvim window `winid`.
++#[derive(Debug, Clone, PartialEq)]
++pub enum WebviewCommand {
++    Open { id: u64, winid: u64, url: String },
++    SetWindow { id: u64, winid: u64 },
++    Post { id: u64, message: String },
++    Focus { id: u64, focus: bool },
++    Close { id: u64 },
++}
++
+ #[derive(Debug, Clone, PartialEq)]
+ pub enum WindowCommand {
+     TitleChanged(String),
+@@ -144,6 +155,7 @@ pub enum WindowCommand {
+     },
+     Minimize,
+     ThemeChanged(Option<Theme>),
++    Webview(WebviewCommand),
+     #[cfg(windows)]
+     RegisterRightClick,
+     #[cfg(windows)]
+diff --git a/src/window/window_wrapper.rs b/src/window/window_wrapper.rs
+index 822f584..94a333b 100644
+--- a/src/window/window_wrapper.rs
++++ b/src/window/window_wrapper.rs
+@@ -615,6 +615,20 @@ impl WinitWindowWrapper {
+                     macos_feature.borrow_mut().show_find_indicator_for_rect(rect, text.as_deref());
+                 }
+             }
++            #[cfg(target_os = "macos")]
++            WindowCommand::Webview(command) => {
++                if let Some(feature) = self.macos_feature_for_window(target_window_id) {
++                    feature.borrow_mut().handle_webview_command(command);
++                }
++                // Place the new/retargeted webview right away.
++                if let Some(route) = self.routes.get(&target_window_id) {
++                    route.window.winit_window.request_redraw();
++                }
++            }
++            #[cfg(not(target_os = "macos"))]
++            WindowCommand::Webview(_) => {
++                log::warn!("neovide.webview is only supported on macOS");
++            }
+             WindowCommand::Minimize => {
+                 self.minimize_window();
+                 if let Some(route) = self.routes.get_mut(&target_window_id) {
+@@ -1458,6 +1472,15 @@ impl WinitWindowWrapper {
+         }
+ 
+         skia_renderer.swap_buffers();
++
++        #[cfg(target_os = "macos")]
++        if let Some(feature) = route.window.macos_feature.as_ref() {
++            let mut feature = feature.borrow_mut();
++            if feature.has_webviews() {
++                feature.sync_webviews(|winid| webview_placement(&renderer, winid));
++            }
++        }
++
+         if self.ui_state == UIState::FirstFrame {
+             window.set_visible(true);
+             self.ui_state = UIState::Showing;
+@@ -2867,3 +2890,27 @@ impl WinitWindowWrapper {
+         }
+     }
+ }
++
++/// Pixel region of the Nvim window `winid` as drawn this frame, plus the floating windows on top.
++#[cfg(target_os = "macos")]
++fn webview_placement(
++    renderer: &crate::renderer::Renderer,
++    winid: u64,
++) -> Option<crate::platform::macos::WebviewPlacement> {
++    let is_float =
++        |grid: u64| renderer.rendered_windows.get(&grid).is_some_and(|w| w.anchor_info.is_some());
++    // window_regions holds the visible windows in draw order: roots, then floats bottom-up.
++    let index = renderer.window_regions.iter().position(|details| {
++        renderer
++            .rendered_windows
++            .get(&details.id)
++            .is_some_and(|window| window.window_handle == Some(winid))
++    })?;
++    let region = renderer.window_regions[index].region;
++    let occluders = renderer.window_regions[index + 1..]
++        .iter()
++        .filter(|details| is_float(details.id))
++        .map(|details| details.region)
++        .collect();
++    Some(crate::platform::macos::WebviewPlacement { region, occluders })
++}
+-- 
+2.50.1 (Apple Git-155)
+

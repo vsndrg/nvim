@@ -32,7 +32,16 @@ return {
     end
 
     require('auto-session').setup({
-      pre_save_cmds = { 'Neotree close', close_terminals },
+      pre_save_cmds = {
+        'Neotree close',
+        close_terminals,
+        -- Markdown previews are scratch windows over a webview: don't persist them.
+        function()
+          if package.loaded['mdpreview'] then
+            require('mdpreview').close_all()
+          end
+        end,
+      },
       post_restore_cmds = { function()
         vim.cmd('Neotree filesystem show dir=' .. vim.fn.getcwd())
       end },

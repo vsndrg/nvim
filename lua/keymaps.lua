@@ -95,15 +95,17 @@ km.set('n', '<leader>u', function()
 end, { desc = 'Toggle statusline' })
 
 -- Markview bindings (only for markdown files)
-vim.api.nvim_create_autocmd("FileType", {
-  pattern = "markdown",
-  callback = function()
-    local o = { noremap = true, silent = true, buffer = true }
-    km.set('n', '<leader>mp', ':Markview toggle<CR>', vim.tbl_extend('force', o, { desc = 'Markview toggle' }))
-    km.set('n', '<leader>ms', ':Markview splitToggle<CR>', vim.tbl_extend('force', o, { desc = 'Markview split' }))
-    km.set('n', '<leader>mh', ':Markview HybridToggle<CR>', vim.tbl_extend('force', o, { desc = 'Markview hybrid' }))
-  end,
-})
+-- Disabled together with markview: <leader>mp / <leader>ms / <leader>mt now belong
+-- to the graphical preview (mdpreview/lua/mdpreview/init.lua, buffer_keymaps).
+-- vim.api.nvim_create_autocmd("FileType", {
+--   pattern = "markdown",
+--   callback = function()
+--     local o = { noremap = true, silent = true, buffer = true }
+--     km.set('n', '<leader>mp', ':Markview toggle<CR>', vim.tbl_extend('force', o, { desc = 'Markview toggle' }))
+--     km.set('n', '<leader>ms', ':Markview splitToggle<CR>', vim.tbl_extend('force', o, { desc = 'Markview split' }))
+--     km.set('n', '<leader>mh', ':Markview HybridToggle<CR>', vim.tbl_extend('force', o, { desc = 'Markview hybrid' }))
+--   end,
+-- })
 
 -- Terminal mode: Esc → normal mode, C-h/j/k/l → navigate windows
 km.set('t', '<Esc>',   '<C-\\><C-n>',          { noremap = true, silent = true })

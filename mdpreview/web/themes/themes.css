@@ -1,0 +1,275 @@
+/* Theme layer. Structure comes from github-markdown-css (variable-driven);
+ * every theme fills the same variable set:
+ *   github      — GitHub palettes (generated into github-palettes.css)
+ *   vscode      — VSCode markdown preview look, Dark+ / Light+
+ *   colorscheme — variables pushed from nvim highlight groups at runtime
+ */
+
+/* ------------------------------------------------ syntax highlighting map */
+
+.markdown-body {
+  --hl-fg: var(--fgColor-default);
+  --hl-keyword: var(--color-prettylights-syntax-keyword);
+  --hl-function: var(--color-prettylights-syntax-entity);
+  --hl-constant: var(--color-prettylights-syntax-constant);
+  --hl-number: var(--color-prettylights-syntax-constant);
+  --hl-string: var(--color-prettylights-syntax-string);
+  --hl-regexp: var(--color-prettylights-syntax-string-regexp);
+  --hl-builtin: var(--color-prettylights-syntax-variable);
+  --hl-variable: var(--color-prettylights-syntax-constant);
+  --hl-type: var(--color-prettylights-syntax-keyword);
+  --hl-comment: var(--color-prettylights-syntax-comment);
+  --hl-tag: var(--color-prettylights-syntax-entity-tag);
+  --hl-attr: var(--color-prettylights-syntax-constant);
+  --hl-heading: var(--color-prettylights-syntax-markup-heading);
+  --hl-list: var(--color-prettylights-syntax-markup-list);
+  --hl-add-fg: var(--color-prettylights-syntax-markup-inserted-text);
+  --hl-add-bg: var(--color-prettylights-syntax-markup-inserted-bg);
+  --hl-del-fg: var(--color-prettylights-syntax-markup-deleted-text);
+  --hl-del-bg: var(--color-prettylights-syntax-markup-deleted-bg);
+}
+
+.markdown-body .hljs { color: var(--hl-fg); background: transparent; }
+.markdown-body .hljs-doctag,
+.markdown-body .hljs-keyword,
+.markdown-body .hljs-meta .hljs-keyword,
+.markdown-body .hljs-template-tag,
+.markdown-body .hljs-template-variable,
+.markdown-body .hljs-variable.language_ { color: var(--hl-keyword); }
+.markdown-body .hljs-type { color: var(--hl-type); }
+.markdown-body .hljs-title,
+.markdown-body .hljs-title.class_,
+.markdown-body .hljs-title.class_.inherited__,
+.markdown-body .hljs-title.function_ { color: var(--hl-function); }
+.markdown-body .hljs-attr,
+.markdown-body .hljs-attribute { color: var(--hl-attr); }
+.markdown-body .hljs-literal,
+.markdown-body .hljs-meta,
+.markdown-body .hljs-operator,
+.markdown-body .hljs-selector-attr,
+.markdown-body .hljs-selector-class,
+.markdown-body .hljs-selector-id { color: var(--hl-constant); }
+.markdown-body .hljs-number { color: var(--hl-number); }
+.markdown-body .hljs-variable { color: var(--hl-variable); }
+.markdown-body .hljs-regexp { color: var(--hl-regexp); }
+.markdown-body .hljs-string,
+.markdown-body .hljs-meta .hljs-string { color: var(--hl-string); }
+.markdown-body .hljs-built_in,
+.markdown-body .hljs-symbol { color: var(--hl-builtin); }
+.markdown-body .hljs-comment,
+.markdown-body .hljs-code,
+.markdown-body .hljs-formula { color: var(--hl-comment); font-style: var(--hl-comment-style, normal); }
+.markdown-body .hljs-name,
+.markdown-body .hljs-quote,
+.markdown-body .hljs-selector-tag,
+.markdown-body .hljs-selector-pseudo { color: var(--hl-tag); }
+.markdown-body .hljs-subst { color: var(--hl-fg); }
+.markdown-body .hljs-section { color: var(--hl-heading); font-weight: bold; }
+.markdown-body .hljs-bullet { color: var(--hl-list); }
+.markdown-body .hljs-emphasis { font-style: italic; }
+.markdown-body .hljs-strong { font-weight: bold; }
+.markdown-body .hljs-addition { color: var(--hl-add-fg); background-color: var(--hl-add-bg); }
+.markdown-body .hljs-deletion { color: var(--hl-del-fg); background-color: var(--hl-del-bg); }
+
+/* ------------------------------------------------------------- VSCode */
+
+html[data-theme="vscode"] {
+  --page-max-width: none;
+  --page-padding: 14px 26px 50vh;
+}
+
+html[data-theme="vscode"] .markdown-body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe WPC", "Segoe UI", system-ui, "Ubuntu", "Droid Sans", sans-serif;
+  font-size: 14px;
+  line-height: 22px;
+  --fontStack-monospace: "SF Mono", Monaco, Menlo, Consolas, "Ubuntu Mono", "Liberation Mono", "DejaVu Sans Mono", "Courier New", monospace;
+}
+
+html[data-theme="vscode"][data-mode="dark"] .markdown-body {
+  color-scheme: dark;
+  --fgColor-default: #cccccc;
+  --fgColor-muted: #9d9d9d;
+  --fgColor-accent: #3794ff;
+  --fgColor-success: #89d185;
+  --fgColor-attention: #cca700;
+  --fgColor-danger: #f14c4c;
+  --fgColor-done: #b180d7;
+  --bgColor-default: #1f1f1f;
+  --bgColor-muted: #2b2b2b;
+  --bgColor-neutral-muted: #ffffff1a;
+  --bgColor-attention-muted: #264f78;
+  --bgColor-danger-muted: #5a1d1d;
+  --borderColor-default: #ffffff2e;
+  --borderColor-muted: #ffffff2e;
+  --borderColor-neutral-muted: #ffffff2e;
+  --borderColor-accent-emphasis: #0078d4;
+  --borderColor-success-emphasis: #388a34;
+  --borderColor-attention-emphasis: #cca700;
+  --borderColor-danger-emphasis: #be1100;
+  --borderColor-done-emphasis: #b180d7;
+  --focus-outlineColor: #0078d4;
+  --hl-fg: #d4d4d4;
+  --hl-keyword: #569cd6;
+  --hl-type: #4ec9b0;
+  --hl-function: #dcdcaa;
+  --hl-constant: #569cd6;
+  --hl-number: #b5cea8;
+  --hl-string: #ce9178;
+  --hl-regexp: #d16969;
+  --hl-builtin: #4ec9b0;
+  --hl-variable: #9cdcfe;
+  --hl-comment: #6a9955;
+  --hl-tag: #569cd6;
+  --hl-attr: #9cdcfe;
+  --hl-heading: #569cd6;
+  --hl-list: #6796e6;
+  --hl-add-fg: #b5cea8;
+  --hl-add-bg: #373d29;
+  --hl-del-fg: #ce9178;
+  --hl-del-bg: #4b1818;
+}
+
+html[data-theme="vscode"][data-mode="light"] .markdown-body {
+  color-scheme: light;
+  --fgColor-default: #3b3b3b;
+  --fgColor-muted: #616161;
+  --fgColor-accent: #005fb8;
+  --fgColor-success: #388a34;
+  --fgColor-attention: #bf8803;
+  --fgColor-danger: #e51400;
+  --fgColor-done: #652d90;
+  --bgColor-default: #ffffff;
+  --bgColor-muted: #f3f3f3;
+  --bgColor-neutral-muted: #0000000f;
+  --bgColor-attention-muted: #add6ff;
+  --bgColor-danger-muted: #f2dede;
+  --borderColor-default: #00000029;
+  --borderColor-muted: #00000029;
+  --borderColor-neutral-muted: #00000029;
+  --borderColor-accent-emphasis: #005fb8;
+  --borderColor-success-emphasis: #388a34;
+  --borderColor-attention-emphasis: #bf8803;
+  --borderColor-danger-emphasis: #e51400;
+  --borderColor-done-emphasis: #652d90;
+  --focus-outlineColor: #005fb8;
+  --hl-fg: #000000;
+  --hl-keyword: #0000ff;
+  --hl-type: #267f99;
+  --hl-function: #795e26;
+  --hl-constant: #0000ff;
+  --hl-number: #098658;
+  --hl-string: #a31515;
+  --hl-regexp: #811f3f;
+  --hl-builtin: #267f99;
+  --hl-variable: #001080;
+  --hl-comment: #008000;
+  --hl-tag: #800000;
+  --hl-attr: #e50000;
+  --hl-heading: #800000;
+  --hl-list: #0451a5;
+  --hl-add-fg: #098658;
+  --hl-add-bg: #dbe9d0;
+  --hl-del-fg: #a31515;
+  --hl-del-bg: #f5d0d0;
+}
+
+/* VSCode preview differences from GitHub. */
+html[data-theme="vscode"] .markdown-body a { text-decoration: none; }
+html[data-theme="vscode"] .markdown-body a:hover { text-decoration: underline; }
+html[data-theme="vscode"] .markdown-body h1,
+html[data-theme="vscode"] .markdown-body h2,
+html[data-theme="vscode"] .markdown-body h3,
+html[data-theme="vscode"] .markdown-body h4,
+html[data-theme="vscode"] .markdown-body h5,
+html[data-theme="vscode"] .markdown-body h6 { font-weight: normal; line-height: 1.2; }
+html[data-theme="vscode"] .markdown-body h1 { font-size: 2em; padding-bottom: .3em; border-bottom: 1px solid var(--borderColor-default); }
+html[data-theme="vscode"] .markdown-body h2 { padding-bottom: .3em; border-bottom: 1px solid var(--borderColor-default); }
+html[data-theme="vscode"] .markdown-body code { font-size: 1em; padding: 1px 3px; border-radius: 4px; }
+html[data-theme="vscode"] .markdown-body pre { padding: 16px; border-radius: 3px; background-color: var(--bgColor-muted); }
+html[data-theme="vscode"] .markdown-body pre code { font-size: 1em; line-height: 1.357em; }
+html[data-theme="vscode"] .markdown-body blockquote {
+  margin: 0 7px 0 5px;
+  padding: 2px 16px 2px 10px;
+  border-left: 5px solid var(--borderColor-accent-emphasis);
+  background: var(--bgColor-neutral-muted);
+  color: inherit;
+}
+html[data-theme="vscode"] .markdown-body table { border-collapse: collapse; }
+html[data-theme="vscode"] .markdown-body table tr { background-color: transparent; border-top: none; }
+html[data-theme="vscode"] .markdown-body table tr:nth-child(2n) { background-color: transparent; }
+html[data-theme="vscode"] .markdown-body table th,
+html[data-theme="vscode"] .markdown-body table td { border: none; padding: 5px 10px; }
+html[data-theme="vscode"] .markdown-body table > thead > tr > th { border-bottom: 1px solid var(--borderColor-default); text-align: left; }
+html[data-theme="vscode"] .markdown-body table > tbody > tr + tr > td { border-top: 1px solid var(--borderColor-default); }
+html[data-theme="vscode"] .markdown-body hr { height: 0; border: 0; border-bottom: 2px solid var(--borderColor-default); }
+
+/* --------------------------------------------------------- colorscheme */
+
+/* All colours arrive as inline custom properties on <html>; re-declare them
+ * on .markdown-body so they win over the GitHub defaults set there. */
+html[data-theme="colorscheme"] .markdown-body {
+  color-scheme: var(--cs-color-scheme, dark);
+  --fgColor-default: var(--cs-fg);
+  --fgColor-muted: var(--cs-fg-muted);
+  --fgColor-accent: var(--cs-accent);
+  --fgColor-success: var(--cs-success);
+  --fgColor-attention: var(--cs-attention);
+  --fgColor-danger: var(--cs-danger);
+  --fgColor-done: var(--cs-done);
+  --bgColor-default: var(--cs-bg);
+  --bgColor-muted: var(--cs-bg-muted);
+  --bgColor-neutral-muted: var(--cs-bg-neutral);
+  --bgColor-attention-muted: var(--cs-bg-attention);
+  --bgColor-danger-muted: var(--cs-bg-danger);
+  --borderColor-default: var(--cs-border);
+  --borderColor-muted: var(--cs-border);
+  --borderColor-neutral-muted: var(--cs-border);
+  --borderColor-accent-emphasis: var(--cs-accent);
+  --borderColor-success-emphasis: var(--cs-success);
+  --borderColor-attention-emphasis: var(--cs-attention);
+  --borderColor-danger-emphasis: var(--cs-danger);
+  --borderColor-done-emphasis: var(--cs-done);
+  --focus-outlineColor: var(--cs-accent);
+  --fontStack-monospace: var(--cs-mono-font, ui-monospace, SFMono-Regular, Menlo, monospace);
+  --hl-fg: var(--cs-hl-fg);
+  --hl-keyword: var(--cs-hl-keyword);
+  --hl-type: var(--cs-hl-type);
+  --hl-function: var(--cs-hl-function);
+  --hl-constant: var(--cs-hl-constant);
+  --hl-number: var(--cs-hl-number);
+  --hl-string: var(--cs-hl-string);
+  --hl-regexp: var(--cs-hl-regexp);
+  --hl-builtin: var(--cs-hl-builtin);
+  --hl-variable: var(--cs-hl-variable);
+  --hl-comment: var(--cs-hl-comment);
+  --hl-comment-style: var(--cs-hl-comment-style, normal);
+  --hl-tag: var(--cs-hl-tag);
+  --hl-attr: var(--cs-hl-attr);
+  --hl-heading: var(--cs-heading);
+  --hl-list: var(--cs-hl-list);
+  --hl-add-fg: var(--cs-success);
+  --hl-add-bg: var(--cs-bg-success);
+  --hl-del-fg: var(--cs-danger);
+  --hl-del-bg: var(--cs-bg-danger);
+}
+html[data-theme="colorscheme"] .markdown-body h1,
+html[data-theme="colorscheme"] .markdown-body h2,
+html[data-theme="colorscheme"] .markdown-body h3,
+html[data-theme="colorscheme"] .markdown-body h4,
+html[data-theme="colorscheme"] .markdown-body h5,
+html[data-theme="colorscheme"] .markdown-body h6 { color: var(--cs-heading); }
+html[data-theme="colorscheme"] .markdown-body code:not(.hljs) { color: var(--cs-code-fg, inherit); }
+html[data-theme="colorscheme"] {
+  --selection-bg: var(--cs-selection);
+  --active-line-color: var(--cs-accent);
+  --find-match-bg: var(--cs-search);
+  --find-current-bg: var(--cs-cur-search);
+}
+
+/* Page background follows the active palette (it lives outside .markdown-body). */
+html { background: var(--page-bg, #fff); }
+html[data-mode="dark"] { --page-bg: #0d1117; }
+html[data-theme="vscode"][data-mode="dark"] { --page-bg: #1f1f1f; }
+html[data-theme="vscode"][data-mode="light"] { --page-bg: #ffffff; }
+html[data-theme="colorscheme"] { --page-bg: var(--cs-bg); }
+body { background: var(--page-bg); }

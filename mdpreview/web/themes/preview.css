@@ -1,0 +1,120 @@
+/* Page chrome shared by all themes. Colours come from the GitHub variable
+ * set (--fgColor-*, --bgColor-*, --borderColor-*), which every theme fills. */
+
+html, body {
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  min-height: 100vh;
+}
+
+#content {
+  box-sizing: border-box;
+  max-width: var(--page-max-width, 980px);
+  margin: 0 auto;
+  padding: var(--page-padding, 32px 45px 50vh);
+  background: transparent;
+}
+
+/* Scrollbar in theme colours. The track must be opaque: the webview does not
+ * draw a background of its own, so a transparent gutter shows Neovide behind. */
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track,
+::-webkit-scrollbar-corner { background: var(--page-bg); }
+::-webkit-scrollbar-thumb {
+  background: var(--scrollbar-thumb, rgba(128, 128, 128, .35));
+  border-radius: 5px;
+  border: 2px solid var(--page-bg);
+}
+::-webkit-scrollbar-thumb:hover { background: rgba(128, 128, 128, .6); }
+
+::selection { background: var(--selection-bg, var(--bgColor-attention-muted)); }
+
+/* Source position indicator (cursor line in split mode), as in VSCode. */
+.show-active-line .code-active-line { position: relative; }
+.show-active-line .code-active-line::before {
+  content: '';
+  position: absolute;
+  left: -14px;
+  top: 0;
+  height: 100%;
+  min-height: 1em;
+  border-left: 3px solid var(--active-line-color, var(--fgColor-accent));
+  border-radius: 2px;
+  opacity: .7;
+}
+li.code-active-line::before { left: -30px !important; }
+
+/* Code blocks: copy button like on GitHub. */
+.markdown-body .highlight { position: relative; }
+.markdown-body .copy-button {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 30px;
+  height: 30px;
+  border-radius: 6px;
+  border: 1px solid var(--borderColor-default);
+  background: var(--bgColor-default);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity .15s;
+}
+.markdown-body .highlight:hover .copy-button { opacity: 1; }
+.markdown-body .copy-button::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  width: 16px;
+  height: 16px;
+  background-color: var(--fgColor-muted);
+  -webkit-mask: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><path d='M0 6.75C0 5.784.784 5 1.75 5h1.5a.75.75 0 0 1 0 1.5h-1.5a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 0 0 .25-.25v-1.5a.75.75 0 0 1 1.5 0v1.5A1.75 1.75 0 0 1 9.25 16h-7.5A1.75 1.75 0 0 1 0 14.25Z'/><path d='M5 1.75C5 .784 5.784 0 6.75 0h7.5C15.216 0 16 .784 16 1.75v7.5A1.75 1.75 0 0 1 14.25 11h-7.5A1.75 1.75 0 0 1 5 9.25Zm1.75-.25a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 0 0 .25-.25v-7.5a.25.25 0 0 0-.25-.25Z'/></svg>") center / contain no-repeat;
+}
+.markdown-body .copy-button.copied::before {
+  background-color: var(--fgColor-success);
+  -webkit-mask: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><path d='M13.78 4.22a.75.75 0 0 1 0 1.06l-7.25 7.25a.75.75 0 0 1-1.06 0L2.22 9.28a.751.751 0 0 1 .018-1.042.751.751 0 0 1 1.042-.018L6 10.94l6.72-6.72a.75.75 0 0 1 1.06 0Z'/></svg>") center / contain no-repeat;
+}
+
+/* Task list items are clickable (toggles the source). */
+.markdown-body .task-list-item-checkbox { cursor: pointer; }
+
+/* Search matches. */
+mark.find-match {
+  background: var(--find-match-bg, #ffd33d66);
+  color: inherit;
+  border-radius: 2px;
+}
+mark.find-match.current {
+  background: var(--find-current-bg, #ff9632);
+  color: #000;
+}
+
+/* Mermaid / math. */
+.markdown-body .mermaid-block {
+  display: flex;
+  justify-content: center;
+  margin-bottom: var(--base-size-16);
+}
+.markdown-body .mermaid-block svg { max-width: 100%; height: auto; }
+.markdown-body .mermaid-block:not(.mermaid-rendered) .mermaid-source {
+  opacity: .5;
+  width: 100%;
+}
+.markdown-body .mermaid-stale { outline: 1px dashed var(--fgColor-danger); outline-offset: 4px; }
+.markdown-body .mermaid-error,
+.markdown-body .katex-error,
+.markdown-body .front-matter-error {
+  color: var(--fgColor-danger);
+  white-space: pre-wrap;
+  width: 100%;
+}
+.markdown-body .math-block { overflow-x: auto; overflow-y: hidden; margin-bottom: var(--base-size-16); }
+.markdown-body .katex-display { overflow-x: auto; overflow-y: hidden; }
+.markdown-body .front-matter { overflow-x: auto; margin-bottom: var(--base-size-16); }
+.markdown-body .front-matter table { font-size: 85%; }
+
+/* Heading anchors are links, not clickable text. */
+.markdown-body .anchor { cursor: pointer; }
