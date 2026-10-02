@@ -4,7 +4,12 @@
 -- WKWebView (patched Neovide, `neovide.webview`). Modes per source buffer:
 --   code     preview hidden (webview kept alive for fast toggling)
 --   split    view window to the right of the source window
---   preview  view buffer replaces the source in its window
+--   preview  view buffer replaces the source in its window; when another file
+--            is edited over it, the session stays in this mode and the preview
+--            comes back as soon as the source is shown again (`:e #`, <C-b>)
+--
+-- The view buffer stands in for its source: it never becomes anyone's
+-- alternate file, so `:e #` from or to a preview behaves like for code.
 local build = require("mdpreview.build")
 local theme = require("mdpreview.theme")
 
@@ -22,7 +27,7 @@ local theme_name = theme.load_choice()
 
 local warned = false
 
-local function available()
+local function unavailable_reason()
   local reason
   if not vim.g.neovide then
     reason = "graphical preview needs Neovide"
@@ -34,6 +39,11 @@ local function available()
       reason = "Neovide runs with --no-multigrid; the preview needs multigrid"
     end
   end
+  return reason
+end
+
+local function available()
+  local reason = unavailable_reason()
   if reason and not warned then
     warned = true
     vim.notify("mdpreview: " .. reason, vim.log.levels.WARN)
@@ -74,6 +84,14 @@ end
 
 local function valid_win(win)
   return win and api.nvim_win_is_valid(win)
+end
+
+-- Swap source <-> view in `win` without touching its alternate file or jumplist
+-- (nvim_win_set_buf would make the source the alternate of its own preview).
+local function swap_buf(win, buf)
+  api.nvim_win_call(win, function()
+    vim.cmd("keepalt keepjumps buffer " .. buf)
+  end)
 end
 
 -- Source window to follow/drive: the current window if it shows the source.
@@ -312,16 +330,25 @@ local function open_link(s, href)
     vim.ui.open(path)
     return
   end
+  -- In preview mode the link is followed in the preview's window, like any
+  -- `:edit` over it: this session stays a preview for <C-b> back.
   local was_preview = s.mode == "preview"
-  if was_preview then
-    set_mode(s, "code")
-  end
-  local win = source_window(s) or api.nvim_get_current_win()
+  local win = was_preview and windows_with(s.view)[1] or source_window(s) or api.nvim_get_current_win()
   api.nvim_set_current_win(win)
   vim.cmd.edit(vim.fn.fnameescape(path))
-  jump_to_anchor(api.nvim_get_current_buf(), win, url_decode(anchor))
+  local buf = api.nvim_get_current_buf()
+  anchor = url_decode(anchor)
+  jump_to_anchor(buf, win, anchor)
   if was_preview then
-    M.open(api.nvim_get_current_buf(), "preview")
+    local target = sessions[buf]
+    if target and target.mode == "preview" then
+      -- Brought back by its BufWinEnter handler (scheduled): start at the anchor.
+      if anchor ~= "" then
+        target.preview_line = topline(win) - 1
+      end
+    else
+      M.open(buf, "preview")
+    end
   end
 end
 
@@ -459,6 +486,23 @@ end
 
 -- -------------------------------------------------------------- sessions
 
+-- Put the view in `win` in place of the source.
+local function show_view(s, win)
+  swap_buf(win, s.view)
+  setup_view_window(win)
+  vim.wo[win].winfixbuf = false
+  api.nvim_set_current_win(win)
+end
+
+-- Preview mode, the source just came back into `win`.
+local function enter_preview(s, win)
+  show_view(s, win)
+  rebind(s)
+  if s.preview_line then
+    post(s, { type = "scroll", action = "toline", n = s.preview_line })
+  end
+end
+
 local function attach_autocmds(s)
   local group = api.nvim_create_augroup("mdpreview_" .. s.id, { clear = true })
   s.group = group
@@ -503,18 +547,33 @@ local function attach_autocmds(s)
   })
   api.nvim_create_autocmd({ "BufWinEnter", "BufWinLeave", "WinClosed", "TabEnter", "WinNew" }, {
     group = group,
-    callback = function()
+    callback = function(ev)
+      -- The source is shown again after another file was edited over its
+      -- preview (`:e #`, <C-b>, a picker): bring the preview back. Noted right
+      -- away, because the callbacks scheduled by the same `:edit` (BufWinLeave
+      -- of the other file) would otherwise run first and take the visible
+      -- source for a closed preview window.
+      if ev.event == "BufWinEnter" and ev.buf == s.src and s.mode == "preview" and #windows_with(s.view) == 0 then
+        s.reenter_win = api.nvim_get_current_win()
+      end
       vim.schedule(function()
         if sessions[s.src] ~= s then
           return
         end
+        local win = s.reenter_win
+        s.reenter_win = nil
+        if win and s.mode == "preview" and #windows_with(s.view) == 0
+          and valid_win(win) and api.nvim_win_get_buf(win) == s.src then
+          enter_preview(s, win)
+          return
+        end
         rebind(s)
-        -- The user closed the preview window (`:q`, `<C-w>c`).
+        -- The preview window was closed (`:q`, `<C-w>c`) while the source is
+        -- still visible: that is a switch to code. With nothing visible (another
+        -- file edited over the preview) the session keeps waiting in preview mode.
         if s.mode ~= "code" and not s.switching and #windows_with(s.view) == 0 then
           if s.mode == "split" or #windows_with(s.src) > 0 then
             s.mode = "code"
-          else
-            close_session(s)
           end
         end
       end)
@@ -546,10 +605,23 @@ local function attach_autocmds(s)
       end
     end,
   })
-  api.nvim_create_autocmd("WinLeave", {
+  -- The page owns the keyboard only while the view is the current buffer in
+  -- normal mode. A key the page routes back to nvim sends `blur` first, and
+  -- SafeState may hand focus back before nvim has processed that key, so every
+  -- way out has to release it: another window, another buffer in this window
+  -- (`:e #` would leave a hidden webview holding the keyboard), another mode.
+  api.nvim_create_autocmd({ "WinLeave", "BufLeave" }, {
     group = group,
     callback = function()
       if view_is_current(s) then
+        set_webview_focus(s, false)
+      end
+    end,
+  })
+  api.nvim_create_autocmd("ModeChanged", {
+    group = group,
+    callback = function()
+      if s.focused and api.nvim_get_mode().mode ~= "n" then
         set_webview_focus(s, false)
       end
     end,
@@ -582,7 +654,7 @@ close_session = function(s)
     -- In preview mode the view occupies the source's window: put the source back.
     for _, win in ipairs(vim.fn.win_findbuf(s.view)) do
       if api.nvim_buf_is_valid(s.src) and s.mode == "preview" then
-        api.nvim_win_set_buf(win, s.src)
+        swap_buf(win, s.src)
       elseif #api.nvim_list_wins() > 1 then
         pcall(api.nvim_win_close, win, true)
       end
@@ -637,7 +709,7 @@ set_mode = function(s, mode)
     end
   elseif prev == "preview" then
     for _, win in ipairs(windows_with(s.view)) do
-      api.nvim_win_set_buf(win, s.src)
+      swap_buf(win, s.src)
       local cursor = s.code_cursor
       if not cursor and s.preview_line then
         cursor = { math.floor(s.preview_line) + 1, 0 }
@@ -671,10 +743,7 @@ set_mode = function(s, mode)
     if src_win then
       s.preview_line = topline(src_win) - 1
     end
-    api.nvim_win_set_buf(win, s.view)
-    setup_view_window(win)
-    vim.wo[win].winfixbuf = false
-    api.nvim_set_current_win(win)
+    show_view(s, win)
   end
 
   s.mode = mode
@@ -784,7 +853,30 @@ function M.buffer_keymaps(buf)
   map("<leader>mt", function() M.set_theme("next") end, "Markdown preview next theme")
 end
 
-function M.setup()
+-- A markdown file shown in an ordinary editor window opens as a preview.
+local function wants_auto_preview(buf, win)
+  if sessions[buf] or by_view[buf] or vim.bo[buf].filetype ~= "markdown" or vim.bo[buf].buftype ~= "" then
+    return false
+  end
+  if api.nvim_win_get_config(win).relative ~= "" or vim.wo[win].diff then
+    return false
+  end
+  -- A new or empty file is opened to be written, not read.
+  if api.nvim_buf_line_count(buf) == 1 and api.nvim_buf_get_lines(buf, 0, 1, false)[1] == "" then
+    return false
+  end
+  -- A split preview follows the markdown buffer shown in its source window.
+  for _, s in pairs(sessions) do
+    if s.mode == "split" and s.src_win == win then
+      return false
+    end
+  end
+  return unavailable_reason() == nil
+end
+
+---@param config? { auto?: boolean } auto (default true): open markdown files as a preview
+function M.setup(config)
+  config = config or {}
   api.nvim_create_user_command("MdPreview", function(opts)
     local args = opts.fargs
     local sub = args[1] or "toggle"
@@ -837,6 +929,34 @@ function M.setup()
     if api.nvim_buf_is_loaded(buf) and vim.bo[buf].filetype == "markdown" then
       M.buffer_keymaps(buf)
     end
+  end
+
+  -- Editing another file over a preview makes the view buffer that window's
+  -- alternate file; point it at the source, so `:e #` / <C-b> returns to the
+  -- document (shown as a preview again, see attach_autocmds).
+  api.nvim_create_autocmd("BufEnter", {
+    group = group,
+    callback = function()
+      local s = by_view[vim.fn.bufnr("#")]
+      if s and api.nvim_buf_is_valid(s.src) and api.nvim_get_current_buf() ~= s.src then
+        vim.fn.setreg("#", s.src)
+      end
+    end,
+  })
+
+  if config.auto ~= false then
+    api.nvim_create_autocmd("BufWinEnter", {
+      group = group,
+      callback = function(ev)
+        local win = api.nvim_get_current_win()
+        vim.schedule(function()
+          if api.nvim_buf_is_valid(ev.buf) and valid_win(win) and api.nvim_win_get_buf(win) == ev.buf
+            and wants_auto_preview(ev.buf, win) then
+            M.open(ev.buf, "preview")
+          end
+        end)
+      end,
+    })
   end
 end
 

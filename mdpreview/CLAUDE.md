@@ -66,10 +66,25 @@ page → nvim (`webkit.messageHandlers.neovide` → `on_message`):
 
 Lines are 0-based markdown-it `map[0]` values.
 
+## Modes and the alternate file
+
+- Markdown files open as a preview (`setup({ auto = false })` turns this off). This applies only to normal file buffers in non-floating, non-diff windows, and not to new or empty files.
+- Each buffer remembers its mode: `<CR>` / `<leader>mp` to code stays code when you come back.
+- Editing another file over a preview does not close the session. It waits in `preview` mode, and the preview comes back when the source is shown again (`attach_autocmds`, `reenter_win`).
+- The view buffer is never anyone's alternate file:
+  - source and view are swapped with `keepalt buffer` (`swap_buf`);
+  - a `BufEnter` hook turns a view-buffer alternate into its source.
+
+  So `:e #` / `<C-b>` work exactly as for code. `nvim_win_set_buf` would make the source the alternate of its own preview.
+
 ## Keyboard model
 
 - While the view window is current in normal mode, Lua gives the webview the keyboard on `SafeState` (`set_webview_focus`, `PAGE_KEYS`). This lets JS see keydown and keyup, so held `j`/`k` scroll smoothly with no key-repeat delay.
 - Neovide routes every other key to nvim natively.
+- Release focus on every way out of "view current, normal mode": `WinLeave`, `BufLeave` (`:e #` in the same window) and `ModeChanged`.
+  - Why: a routed key sends `blur` before nvim has processed the key itself, so `SafeState` hands focus back to the page first.
+  - If the key then leaves the view, the webview is hidden while it is first responder. Every keystroke then goes to the NSWindow and beeps.
+  - `--remote-send` does not show this: test focus with real keys (`CGEvent.postToPid`).
 - Never replay keys from JS through nvim (`nvim_input` / `exec_lua`). It races with direct input: `<Space>mp` arrived as `<Space>p`.
 - Letter keys are matched by physical key (`e.code` in JS, ANSI key codes in Rust), so the RU layout works.
 
