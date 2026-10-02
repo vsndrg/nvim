@@ -32,18 +32,34 @@ index 8bf2e5d..dde7c9f 100644
  name = "object"
  version = "0.37.3"
 diff --git a/Cargo.toml b/Cargo.toml
-index 7397643..65ad6a7 100644
+index 7397643..807e470 100644
 --- a/Cargo.toml
 +++ b/Cargo.toml
-@@ -157,6 +157,7 @@ objc2-core-foundation = { version = "0.3.1", default-features = false, features
+@@ -149,6 +149,7 @@ objc2-app-kit = { version = "0.3.1", default-features = false, features = [
+   "NSWorkspace",
+   "block2",
+   "objc2-core-foundation",
++  "objc2-core-graphics",
+   "objc2-quartz-core",
+   "std",
+ ] }
+@@ -157,7 +158,10 @@ objc2-core-foundation = { version = "0.3.1", default-features = false, features
  ] }
  objc2-core-graphics = { version = "0.3.1", default-features = false, features = [
    "CGColor",
 +  "CGPath",
    "CGDirectDisplay",
++  "CGEvent",
++  "CGEventTypes",
  ] }
  objc2-core-video = { version = "0.3.1", default-features = false, features = [
-@@ -174,6 +175,7 @@ objc2-foundation = { version = "0.3.1", default-features = false, features = [
+   "CVBase",
+@@ -170,10 +174,12 @@ objc2-foundation = { version = "0.3.1", default-features = false, features = [
+   "NSAttributedString",
+   "NSDictionary",
+   "NSProcessInfo",
++  "NSRunLoop",
+   "NSString",
    "NSTimer",
    "NSURL",
    "NSUserDefaults",
@@ -51,15 +67,17 @@ index 7397643..65ad6a7 100644
    "std",
  ] }
  objc2-metal = { version = "0.3.1", default-features = false, features = [
-@@ -183,6 +185,7 @@ objc2-metal = { version = "0.3.1", default-features = false, features = [
+@@ -182,7 +188,9 @@ objc2-metal = { version = "0.3.1", default-features = false, features = [
+   "std",
  ] }
  objc2-quartz-core = { version = "0.3.1", default-features = false, features = [
++  "CADisplayLink",
    "CALayer",
 +  "CAShapeLayer",
    "CAMetalLayer",
    "CATransaction",
    "objc2-core-foundation",
-@@ -190,6 +193,20 @@ objc2-quartz-core = { version = "0.3.1", default-features = false, features = [
+@@ -190,6 +198,20 @@ objc2-quartz-core = { version = "0.3.1", default-features = false, features = [
    "objc2-metal",
    "std",
  ] }
@@ -323,20 +341,21 @@ index b4e486a..4090413 100644
              RedrawEvent::WindowFloatPosition {
                  grid,
 diff --git a/src/platform/macos/mod.rs b/src/platform/macos/mod.rs
-index cba9ade..85af79c 100644
+index cba9ade..2d8713b 100644
 --- a/src/platform/macos/mod.rs
 +++ b/src/platform/macos/mod.rs
-@@ -1,5 +1,9 @@
+@@ -1,5 +1,10 @@
  pub mod settings;
  mod switcher;
 +mod webview;
++mod wheel_resampler;
 +
 +use webview::WebviewManager;
 +pub use webview::WebviewPlacement;
  
  pub use switcher::{
      EditorSwitcherRow, close_editor_switcher_if_open, editor_switcher_key_event_matches,
-@@ -351,9 +355,34 @@ pub struct MacosWindowFeature {
+@@ -351,9 +356,34 @@ pub struct MacosWindowFeature {
      neovim_handler: NeovimHandler,
      simple_fullscreen: bool,
      has_transparent_titlebar: bool,
@@ -371,7 +390,7 @@ index cba9ade..85af79c 100644
      pub fn from_winit_window(
          window: &Window,
          settings: Arc<Settings>,
-@@ -439,6 +468,7 @@ impl MacosWindowFeature {
+@@ -439,6 +469,7 @@ impl MacosWindowFeature {
              neovim_handler,
              simple_fullscreen,
              has_transparent_titlebar,
@@ -381,10 +400,10 @@ index cba9ade..85af79c 100644
          let mut macos_window_feature = macos_window_feature;
 diff --git a/src/platform/macos/webview.rs b/src/platform/macos/webview.rs
 new file mode 100644
-index 0000000..0f9eb18
+index 0000000..9fe4a2a
 --- /dev/null
 +++ b/src/platform/macos/webview.rs
-@@ -0,0 +1,671 @@
+@@ -0,0 +1,891 @@
 +//! Native WKWebViews overlaid on Nvim windows.
 +//!
 +//! Nvim (through `neovide.webview.*`) asks for a webview bound to a window handle (`winid`).
@@ -396,23 +415,32 @@ index 0000000..0f9eb18
 +//! Keyboard: while a webview is first responder, only the keys Nvim declared for it (plus
 +//! Cmd+C / Cmd+A for selections) reach the page. Every other key event is handed to the editor
 +//! view synchronously, so it enters Nvim's input in order with the keys typed after it.
++//!
++//! Trackpad: the events of a scroll gesture reach WebKit resampled to the display, one per frame
++//! (see `wheel_resampler`).
 +
 +use std::{cell::RefCell, collections::HashMap};
 +
 +use glamour::Intersection;
 +
 +use objc2::{
-+    DefinedClass, MainThreadOnly, define_class, msg_send,
++    DefinedClass, MainThreadOnly, Message, define_class, msg_send,
 +    rc::{Retained, Weak},
 +    runtime::ProtocolObject,
++    sel,
 +};
-+use objc2_app_kit::{NSEvent, NSEventModifierFlags, NSResponder, NSView, NSWindow};
-+use objc2_core_graphics::CGMutablePath;
++use objc2_app_kit::{
++    NSEvent, NSEventModifierFlags, NSEventPhase, NSResponder, NSScreen, NSView, NSWindow,
++};
++use objc2_core_foundation::CGPoint;
++use objc2_core_graphics::{CGEvent, CGEventField, CGMutablePath};
 +use objc2_foundation::{
-+    MainThreadMarker, NSNumber, NSObject, NSObjectProtocol, NSPoint, NSRect, NSSize, NSString,
-+    NSURL, ns_string,
++    MainThreadMarker, NSNumber, NSObject, NSObjectProtocol, NSPoint, NSRect, NSRunLoop,
++    NSRunLoopCommonModes, NSSize, NSString, NSURL, ns_string,
 +};
-+use objc2_quartz_core::{CAShapeLayer, CATransaction};
++use objc2_quartz_core::{CADisplayLink, CAShapeLayer, CATransaction};
++
++use super::wheel_resampler::WheelResampler;
 +use objc2_web_kit::{
 +    WKScriptMessage, WKScriptMessageHandler, WKUserContentController, WKWebView,
 +    WKWebViewConfiguration,
@@ -587,7 +615,21 @@ index 0000000..0f9eb18
 +    id: u64,
 +    neovim_handler: NeovimHandler,
 +    page_keys: RefCell<Vec<KeySpec>>,
++    wheel: RefCell<WheelGesture>,
 +}
++
++/// The trackpad gesture being resampled.
++#[derive(Debug, Default)]
++struct WheelGesture {
++    resampler: WheelResampler,
++    /// Latest event of the gesture: what resampled events are copied from.
++    template: Option<Retained<NSEvent>>,
++    /// Ticks while a gesture is resampled (it retains the view, so it is invalidated after).
++    link: Option<Retained<CADisplayLink>>,
++}
++
++/// `kCGScrollWheelEventScrollPhase` value of a gesture's ongoing events.
++const CG_SCROLL_PHASE_CHANGED: i64 = 2;
 +
 +define_class!(
 +    #[derive(Debug)]
@@ -633,6 +675,16 @@ index 0000000..0f9eb18
 +            resigned
 +        }
 +
++        #[unsafe(method(scrollWheel:))]
++        fn scroll_wheel(&self, event: &NSEvent) {
++            self.on_scroll_wheel(event);
++        }
++
++        #[unsafe(method(wheelFrame:))]
++        fn wheel_frame(&self, link: &CADisplayLink) {
++            self.on_wheel_frame(link);
++        }
++
 +        // Cmd shortcuts go through key equivalents first: keep the ones the page does not own
 +        // away from WebKit so they reach Nvim through keyDown: above.
 +        #[unsafe(method(performKeyEquivalent:))]
@@ -657,6 +709,7 @@ index 0000000..0f9eb18
 +            id,
 +            neovim_handler,
 +            page_keys: RefCell::new(Vec::new()),
++            wheel: RefCell::new(WheelGesture::default()),
 +        });
 +        unsafe { msg_send![super(this), initWithFrame: NSRect::ZERO, configuration: configuration] }
 +    }
@@ -674,6 +727,191 @@ index 0000000..0f9eb18
 +        self.window()
 +            .and_then(|window| window.firstResponder())
 +            .is_some_and(|responder| is_descendant_responder(&responder, self))
++    }
++
++    // A trackpad gesture's own events (phase began/changed/ended) are resampled; mouse wheels,
++    // the momentum the system generates after a flick (already even) and anything outside a
++    // gesture go to WebKit as they come.
++    fn on_scroll_wheel(&self, event: &NSEvent) {
++        let phase = event.phase();
++        let resampled = event.hasPreciseScrollingDeltas()
++            && event.momentumPhase().is_empty()
++            && phase.intersects(
++                NSEventPhase::Began
++                    | NSEventPhase::Changed
++                    | NSEventPhase::Stationary
++                    | NSEventPhase::Ended
++                    | NSEventPhase::Cancelled,
++            );
++        if !resampled {
++            self.end_wheel_gesture(None);
++            unsafe { msg_send![super(self), scrollWheel: event] }
++            return;
++        }
++        let time = event.timestamp();
++        let delta = [event.scrollingDeltaX(), event.scrollingDeltaY()];
++        if phase.contains(NSEventPhase::Began) {
++            self.end_wheel_gesture(None);
++            self.begin_wheel_gesture(time);
++            unsafe { msg_send![super(self), scrollWheel: event] }
++            return;
++        }
++        if !self.ivars().wheel.borrow().resampler.is_active() {
++            unsafe { msg_send![super(self), scrollWheel: event] }
++            return;
++        }
++        {
++            let mut wheel = self.ivars().wheel.borrow_mut();
++            wheel.resampler.sample(time, delta);
++            wheel.template = Some(event.retain());
++        }
++        if phase.intersects(NSEventPhase::Ended | NSEventPhase::Cancelled) {
++            // The ending event carries whatever the frames have not handed out yet.
++            self.end_wheel_gesture(Some(event));
++        }
++    }
++
++    fn begin_wheel_gesture(&self, time: f64) {
++        let link = unsafe { self.displayLinkWithTarget_selector(self, sel!(wheelFrame:)) };
++        unsafe { link.addToRunLoop_forMode(&NSRunLoop::mainRunLoop(), NSRunLoopCommonModes) };
++        let mut wheel = self.ivars().wheel.borrow_mut();
++        wheel.resampler.begin(time);
++        wheel.link = Some(link);
++    }
++
++    /// Ends the resampled gesture, if any, handing out the rest of its input with `last` (the
++    /// gesture's ending event), or with its latest event.
++    fn end_wheel_gesture(&self, last: Option<&NSEvent>) {
++        let (rest, template) = {
++            let mut wheel = self.ivars().wheel.borrow_mut();
++            if let Some(link) = wheel.link.take() {
++                link.invalidate();
++            }
++            if !wheel.resampler.is_active() {
++                return;
++            }
++            let rest = wheel.resampler.finish();
++            (rest, wheel.template.take())
++        };
++        match last {
++            Some(event) => self.send_wheel(event, rest, None, None),
++            None if rest != [0.0; 2] => {
++                if let Some(template) = template {
++                    self.send_wheel(&template, rest, Some(CG_SCROLL_PHASE_CHANGED), None);
++                }
++            }
++            None => {}
++        }
++    }
++
++    fn on_wheel_frame(&self, link: &CADisplayLink) {
++        let target = link.targetTimestamp();
++        let (step, template, idle) = {
++            let mut wheel = self.ivars().wheel.borrow_mut();
++            if !wheel.resampler.is_active() {
++                return;
++            }
++            let step = wheel.resampler.frame(target, target - link.timestamp());
++            (step, wheel.template.clone(), wheel.resampler.is_idle(target))
++        };
++        if let Some(template) = template
++            && step != [0.0; 2]
++        {
++            self.send_wheel(&template, step, Some(CG_SCROLL_PHASE_CHANGED), Some(target));
++        }
++        // A gesture whose end never arrived (focus moved away mid-gesture) stops here.
++        if idle && self.window().is_none_or(|window| !window.isKeyWindow()) {
++            self.end_wheel_gesture(None);
++        }
++    }
++
++    /// Hands WebKit a copy of `template` carrying `delta` ([x, y], px), optionally with another
++    /// gesture phase and timestamp.
++    fn send_wheel(
++        &self,
++        template: &NSEvent,
++        delta: [f64; 2],
++        phase: Option<i64>,
++        time: Option<f64>,
++    ) {
++        let Some(source) = template.CGEvent() else {
++            return;
++        };
++        let Some(copy) = CGEvent::new_copy(Some(&source)) else {
++            return;
++        };
++        let event = Some(&*copy);
++        let axes = [
++            (
++                delta[1],
++                CGEventField::ScrollWheelEventDeltaAxis1,
++                CGEventField::ScrollWheelEventFixedPtDeltaAxis1,
++                CGEventField::ScrollWheelEventPointDeltaAxis1,
++            ),
++            (
++                delta[0],
++                CGEventField::ScrollWheelEventDeltaAxis2,
++                CGEventField::ScrollWheelEventFixedPtDeltaAxis2,
++                CGEventField::ScrollWheelEventPointDeltaAxis2,
++            ),
++        ];
++        for (pixels, line_field, fixed_field, point_field) in axes {
++            // Each field is derived from the ones set after it: writing the whole lines last
++            // turned the pixel delta into 8 px per line. So lines, fractional lines, then pixels,
++            // in the template's lines-per-pixel ratio.
++            let template_pixels = CGEvent::double_value_field(event, point_field);
++            let ratio = if template_pixels != 0.0 {
++                CGEvent::double_value_field(event, fixed_field) / template_pixels
++            } else {
++                0.1
++            };
++            let lines = pixels * ratio;
++            CGEvent::set_integer_value_field(event, line_field, lines.round() as i64);
++            CGEvent::set_double_value_field(event, fixed_field, lines);
++            CGEvent::set_double_value_field(event, point_field, pixels);
++        }
++        if let Some(phase) = phase {
++            CGEvent::set_integer_value_field(
++                event,
++                CGEventField::ScrollWheelEventScrollPhase,
++                phase,
++            );
++        }
++        if let Some(time) = time {
++            // CGEvent timestamps count in other units than NSEvent's seconds; scale by the
++            // template's pair.
++            let (cg, ns) = (CGEvent::timestamp(event) as f64, template.timestamp());
++            if ns > 0.0 {
++                CGEvent::set_timestamp(event, (time * cg / ns) as u64);
++            }
++        }
++        let Some(mut synthesized) = NSEvent::eventWithCGEvent(&copy) else {
++            return;
++        };
++        let mtm = MainThreadMarker::from(self);
++        if synthesized.window(mtm).is_none() {
++            // Without a window, AppKit reports the screen point as the location in the window.
++            // Place it so that it is the template's location in the window.
++            let Some(screen) = NSScreen::screens(mtm).firstObject() else {
++                return;
++            };
++            let location = template.locationInWindow();
++            CGEvent::set_location(
++                event,
++                CGPoint::new(location.x, screen.frame().size.height - location.y),
++            );
++            let Some(placed) = NSEvent::eventWithCGEvent(&copy) else {
++                return;
++            };
++            synthesized = placed;
++        }
++        unsafe { msg_send![super(self), scrollWheel: &*synthesized] }
++    }
++
++    fn stop_wheel(&self) {
++        if let Some(link) = self.ivars().wheel.borrow_mut().link.take() {
++            link.invalidate();
++        }
 +    }
 +
 +    fn give_focus_to_editor(&self) -> Option<Retained<NSView>> {
@@ -890,6 +1128,7 @@ index 0000000..0f9eb18
 +                .userContentController()
 +                .removeScriptMessageHandlerForName(&NSString::from_str(MESSAGE_HANDLER_NAME));
 +        }
++        pane.view.stop_wheel();
 +        pane.view.removeFromSuperview();
 +        drop(pane.handler);
 +        if had_focus {
@@ -1054,6 +1293,203 @@ index 0000000..0f9eb18
 +        assert_eq!(parse_blur(r#"{"type":"blur"}"#), Some(None));
 +        assert_eq!(parse_blur(r#"{"type":"click","line":3}"#), None);
 +        assert_eq!(parse_blur("not json"), None);
++    }
++}
+diff --git a/src/platform/macos/wheel_resampler.rs b/src/platform/macos/wheel_resampler.rs
+new file mode 100644
+index 0000000..7dafe95
+--- /dev/null
++++ b/src/platform/macos/wheel_resampler.rs
+@@ -0,0 +1,191 @@
++//! Trackpad scroll input resampled to the display.
++//!
++//! A trackpad gesture arrives as scroll events ~120 times a second, but not evenly: on a
++//! recorded gesture the gaps ranged from 2.8 to 20 ms, and the per-event deltas are whole
++//! pixels that do not track those gaps closely. WebKit applies each event in the frame after it
++//! arrives, so the content moved by 21, 3, 18, 11, 15, 10 px on consecutive frames while the
++//! finger moved steadily. The finger's position plotted against the events' hardware timestamps
++//! is close to a straight line, though (within ~3 px).
++//!
++//! So the events are treated as noisy samples of that position. An alpha-beta filter tracks
++//! position and velocity from them, the position is predicted for the time each frame is shown,
++//! lightly smoothed, and handed to WebKit as one event per frame. On the recorded gesture this
++//! gave 15, 14, 15, 14, 13, 14 px steps, and the content trailed the finger by ~2 px on average,
++//! like the raw events did.
++
++/// Weight of a new position sample against the prediction.
++const ALPHA: f64 = 0.4;
++/// Weight of a new sample's residual in the velocity.
++const BETA: f64 = 0.04;
++/// Shortest interval the velocity correction is divided by, in s. Events can come 1-3 ms
++/// apart; dividing a pixel of noise by that made the velocity jump, and with it the content.
++const MIN_INTERVAL: f64 = 0.008;
++/// Furthest the position is extrapolated past the last sample, in s.
++const MAX_AHEAD: f64 = 0.03;
++/// Without samples for this long, in s, the finger is taken to rest where it is.
++const STALE: f64 = 0.04;
++/// Time constant of the output smoothing, in s.
++const SMOOTHING: f64 = 0.008;
++
++#[derive(Debug, Default, Clone, Copy)]
++struct Axis {
++    /// Sum of the input deltas.
++    input: f64,
++    /// Filtered position and velocity (px, px/s) as of the last sample.
++    position: f64,
++    velocity: f64,
++    smoothed: f64,
++    /// Sum of the deltas handed out.
++    sent: f64,
++}
++
++impl Axis {
++    fn sample(&mut self, delta: f64, interval: f64) {
++        self.input += delta;
++        let predicted = self.position + self.velocity * interval;
++        let residual = self.input - predicted;
++        self.position = predicted + ALPHA * residual;
++        self.velocity += BETA * residual / interval.max(MIN_INTERVAL);
++    }
++
++    fn frame(&mut self, ahead: f64, frame_period: f64) -> f64 {
++        let target = if ahead < STALE {
++            self.position + self.velocity * ahead.clamp(0.0, MAX_AHEAD)
++        } else {
++            self.input
++        };
++        self.smoothed += (target - self.smoothed) * (1.0 - (-frame_period / SMOOTHING).exp());
++        if (target - self.smoothed).abs() < 0.5 {
++            self.smoothed = target;
++        }
++        let step = (self.smoothed - self.sent).round();
++        self.sent += step;
++        step
++    }
++
++    fn finish(&mut self) -> f64 {
++        let rest = self.input - self.sent;
++        *self = Self::default();
++        rest
++    }
++}
++
++/// Resamples one gesture's deltas ([x, y], in px) to display frames. Times are in seconds on
++/// the `CACurrentMediaTime` / `NSEvent.timestamp` clock.
++#[derive(Debug, Default)]
++pub struct WheelResampler {
++    axes: [Axis; 2],
++    last_sample: f64,
++    active: bool,
++}
++
++impl WheelResampler {
++    /// Starts a gesture at `time`; nothing of it has been handed out yet.
++    pub fn begin(&mut self, time: f64) {
++        self.axes = Default::default();
++        self.last_sample = time;
++        self.active = true;
++    }
++
++    pub fn is_active(&self) -> bool {
++        self.active
++    }
++
++    /// An input event of the gesture.
++    pub fn sample(&mut self, time: f64, delta: [f64; 2]) {
++        let interval = (time - self.last_sample).max(0.0);
++        for (axis, delta) in self.axes.iter_mut().zip(delta) {
++            axis.sample(delta, interval);
++        }
++        self.last_sample = time;
++    }
++
++    /// Whole-pixel deltas to hand out for the frame shown at `target`.
++    pub fn frame(&mut self, target: f64, frame_period: f64) -> [f64; 2] {
++        let ahead = target - self.last_sample;
++        let mut steps = [0.0; 2];
++        for (step, axis) in steps.iter_mut().zip(&mut self.axes) {
++            *step = axis.frame(ahead, frame_period);
++        }
++        steps
++    }
++
++    /// Whether the finger has rested longer than samples are extrapolated: nothing more will be
++    /// handed out until the next sample.
++    pub fn is_idle(&self, now: f64) -> bool {
++        now - self.last_sample > STALE && self.axes.iter().all(|axis| axis.sent == axis.input)
++    }
++
++    /// Ends the gesture: what is left of the input, so the total handed out equals it.
++    pub fn finish(&mut self) -> [f64; 2] {
++        self.active = false;
++        let [x, y] = &mut self.axes;
++        [x.finish(), y.finish()]
++    }
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++
++    const FRAME: f64 = 1.0 / 120.0;
++
++    /// Feeds `events` (time, dy) and returns the per-frame y steps over `frames` frames.
++    fn run(events: &[(f64, f64)], frames: usize) -> (Vec<f64>, f64) {
++        let mut resampler = WheelResampler::default();
++        resampler.begin(0.0);
++        let mut next = 0;
++        let mut steps = Vec::new();
++        for i in 1..=frames {
++            let now = i as f64 * FRAME;
++            while next < events.len() && events[next].0 <= now {
++                resampler.sample(events[next].0, [0.0, events[next].1]);
++                next += 1;
++            }
++            steps.push(resampler.frame(now + FRAME, FRAME)[1]);
++        }
++        let rest = resampler.finish()[1];
++        (steps, rest)
++    }
++
++    #[test]
++    fn uneven_events_give_even_steps() {
++        // 1.5 px/ms, with events alternating 4 and 12.67 ms apart (deltas in proportion).
++        let mut events = Vec::new();
++        let mut t = 0.0;
++        for i in 0..60 {
++            let gap = if i % 2 == 0 { 0.004 } else { 0.01267 };
++            t += gap;
++            events.push((t, (gap * 1500.0_f64).round()));
++        }
++        let (steps, _) = run(&events, 60);
++        let steady = &steps[30..55];
++        let (min, max) =
++            steady.iter().fold((f64::MAX, f64::MIN), |(a, b), &s| (a.min(s), b.max(s)));
++        assert!(max - min <= 2.0, "steps {steady:?}");
++    }
++
++    #[test]
++    fn hands_out_exactly_the_input() {
++        let events: Vec<_> = (1..40).map(|i| (i as f64 * 0.0083, (i % 7) as f64)).collect();
++        let total: f64 = events.iter().map(|e| e.1).sum();
++        let (steps, rest) = run(&events, 45);
++        assert_eq!(steps.iter().sum::<f64>() + rest, total);
++        assert!(steps.iter().all(|s| s.fract() == 0.0));
++    }
++
++    #[test]
++    fn close_events_do_not_jump() {
++        // A gesture's first events often come 1-3 ms apart.
++        let events = [(0.001, 0.0), (0.002, 3.0), (0.010, 2.0), (0.018, 2.0), (0.026, 2.0)];
++        let (steps, _) = run(&events, 6);
++        assert!(steps.iter().all(|s| s.abs() <= 4.0), "steps {steps:?}");
++    }
++
++    #[test]
++    fn resting_finger_settles_on_the_input() {
++        let events: Vec<_> = (1..20).map(|i| (i as f64 * 0.0083, 10.0)).collect();
++        let (steps, rest) = run(&events, 40);
++        assert_eq!(rest, 0.0, "steps {steps:?}");
 +    }
 +}
 diff --git a/src/renderer/rendered_window.rs b/src/renderer/rendered_window.rs
