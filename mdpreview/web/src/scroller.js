@@ -1,183 +1,178 @@
-// Keyboard scrolling: velocity-based while a key is held (starts on keydown,
-// no key-repeat delay) and eased animated jumps for page/half-page/top/bottom.
+// Scrolling motions, computed ahead as trajectories and played by viewport.js
+// on the compositor: hold j/k = velocity (starts on keydown, no key-repeat
+// delay), d/u/f/b/gg/G = eased jumps, wheel/trackpad = smoothed follow.
 //
-// Motion advances in whole display frames, not by rAF timestamps: WebKit's
-// timestamps have 1 ms resolution and wander a couple of ms around the vsync a
-// frame is shown at, so integrating velocity over them makes the per-frame
-// steps uneven (10 vs 14 px at 120 Hz), which reads as judder. At full speed a
-// frame moves a whole number of pixels: scroll offsets are integral, and a
-// fractional step alternates (12, 13, 12, 13 px for 12.5).
+// Trajectories are sampled once per display frame. At full speed a frame moves
+// a whole number of pixels and every motion comes to rest on a whole pixel, so
+// text is never shown at a fractional offset while it stands still.
+import * as vp from './viewport.js';
 
 const SPEED = 1500; // px/s at full speed while j/k is held
 const RAMP = 0.05; // s, time constant to reach full speed
 const DECAY = 0.045; // s, time constant to stop after release
 const MIN_STEP = 36; // px a single tap covers before easing out (~70px total)
 const JUMP_TAU = 0.06; // s, time constant of animated jumps
+const WHEEL_TAU = 0.04; // s, smoothing of wheel/trackpad input
+const HORIZON = 120; // s, longest planned stretch of a held key
 
-let cur = 0; // our own (fractional) scroll position while animating
-let velocity = 0;
 let holdDir = 0;
-let releasing = false;
-let travelled = 0;
-let target = null;
-let rafId = 0;
-let lastT = null;
-let onScroll = () => {};
-
-// ------------------------------------------------------------ frame clock
-
-const stamps = []; // rAF timestamps of the running animation
-let period = 1000 / 120; // ms, refined from observed frames
-
-// Display refresh period: the span of recent frames over the number of vsyncs
-// in it. Timestamp jitter divides by the frame count, so the estimate settles
-// to a few hundredths of a ms, and dropped frames count as the vsyncs they span.
-function observeFrame(t) {
-  stamps.push(t);
-  if (stamps.length > 121) stamps.shift();
-  if (stamps.length < 9) return;
-  let vsyncs = 0;
-  for (let i = 1; i < stamps.length; i++) {
-    vsyncs += Math.max(1, Math.round((stamps[i] - stamps[i - 1]) / period));
-  }
-  period = Math.min(50, Math.max(4, (stamps[stamps.length - 1] - stamps[0]) / vsyncs));
-}
-
-// Seconds of display time since the previous frame, in whole frames.
-function frameDt(t) {
-  observeFrame(t);
-  if (lastT == null) {
-    lastT = t;
-    return period / 1000;
-  }
-  const ms = t - lastT;
-  lastT = t;
-  return Math.min(0.05, Math.max(1, Math.round(ms / period)) * period / 1000);
-}
+let holdFrom = 0; // offset where the current hold started
+let jumpTarget = null;
+let wheelTarget = null;
 
 // Full speed, rounded so that one frame moves a whole number of pixels. The
 // step only changes when the refresh rate does: 1500 px/s at 120 Hz is 12.5 px,
 // and plain rounding would flip between 12 and 13 with every period estimate.
 let fullStep = 0;
 
-function fullSpeed() {
-  const frameS = period / 1000;
-  const exact = SPEED * frameS;
+function fullSpeed(h) {
+  const exact = (SPEED * h) / 1000;
   if (Math.abs(exact - fullStep) > 1) fullStep = Math.max(1, Math.round(exact));
-  return fullStep / frameS;
+  return (fullStep * 1000) / h;
 }
 
-// ---------------------------------------------------------------- motion
-
-function maxY() {
-  return Math.max(0, document.documentElement.scrollHeight - window.innerHeight);
-}
-
-function clamp(y) {
-  return Math.min(Math.max(y, 0), maxY());
-}
-
-function frame(t) {
-  const dt = frameDt(t);
-  let active = false;
-
-  if (holdDir) {
-    const stopping = releasing && travelled >= MIN_STEP;
-    if (stopping) {
-      velocity *= Math.exp(-dt / DECAY);
-    } else {
-      const full = holdDir * fullSpeed();
-      velocity += (full - velocity) * (1 - Math.exp(-dt / RAMP));
-      // Land exactly on full speed so the steps become constant.
-      if (Math.abs(full - velocity) < Math.abs(full) * 0.01) velocity = full;
+// Samples `step(x, v, dt) -> [x, v] | null` from the current state, one per
+// frame, until it returns null (motion over) or reaches an end of the page,
+// and plays the result.
+function simulate(step) {
+  const h = vp.framePeriod();
+  const dt = h / 1000;
+  const max = vp.maxY();
+  // Planned from the handoff time on (see viewport.js).
+  const th = vp.handoffTime();
+  let x = vp.y(th);
+  let v = vp.velocity(th);
+  const xs = [x];
+  for (let t = 0; t < HORIZON; t += dt) {
+    const next = step(x, v, dt);
+    if (!next) break;
+    [x, v] = next;
+    if (x <= 0 || x >= max) {
+      xs.push(Math.min(Math.max(x, 0), max));
+      break;
     }
-    const dy = velocity * dt;
-    cur += dy;
-    travelled += Math.abs(dy);
-    if (stopping && Math.abs(velocity) < 15) {
-      holdDir = 0;
-      velocity = 0;
-    } else {
-      active = true;
-    }
-  } else if (target != null) {
-    cur += (target - cur) * (1 - Math.exp(-dt / JUMP_TAU));
-    if (Math.abs(target - cur) < 0.5) {
-      cur = target;
-      target = null;
-    } else {
-      active = true;
-    }
+    xs.push(x);
   }
-
-  cur = clamp(cur);
-  window.scrollTo(0, Math.round(cur));
-  onScroll();
-  if (active) {
-    rafId = requestAnimationFrame(frame);
-  } else {
-    rafId = 0;
-    lastT = null;
-  }
+  vp.play(xs, h);
 }
 
-function ensureLoop() {
-  if (!rafId) {
-    cur = window.scrollY;
-    lastT = null;
-    stamps.length = 0;
-    rafId = requestAnimationFrame(frame);
-  }
+// Exponential approach to `stopAt`, starting with velocity `v0` when it heads
+// that way (critically damped join), else as a plain ease-out.
+function settle(x0, v0, stopAt, tau) {
+  const a = x0 - stopAt;
+  const c = Math.abs(v0) < 1 || Math.sign(v0) !== Math.sign(-a) ? 0 : v0 + a / tau;
+  let t = 0;
+  return (x, v, dt) => {
+    if (x === stopAt) return null;
+    t += dt;
+    const nx = stopAt + (a + c * t) * Math.exp(-t / tau);
+    // Never overshoot and swing back: arriving fast just ends the motion.
+    const passed = Math.sign(nx - stopAt) !== Math.sign(a);
+    return passed || Math.abs(nx - stopAt) < 0.3 ? [stopAt, 0] : [nx, (nx - x) / dt];
+  };
 }
 
-export function setScrollListener(fn) {
-  onScroll = fn;
+// Coasting to a stop from (x, v): lands on a whole pixel about v * DECAY away.
+function coast(x, v) {
+  const stopAt = Math.round(x + v * DECAY);
+  const tau = stopAt !== x && Math.sign(stopAt - x) === Math.sign(v) ? (stopAt - x) / v : DECAY;
+  let t = 0;
+  return (cx, cv, dt) => {
+    if (cx === stopAt) return null;
+    t += dt;
+    const nx = stopAt + (x - stopAt) * Math.exp(-t / tau);
+    return Math.abs(nx - stopAt) < 0.3 ? [stopAt, 0] : [nx, (nx - cx) / dt];
+  };
 }
 
-export function isAnimating() {
-  return rafId !== 0;
+// Accelerates towards full speed in `dir`. With `until` set, coasts to a stop
+// once the hold has covered `until` px.
+function hold(dir, until = null) {
+  const full = dir * fullSpeed(vp.framePeriod());
+  let coasting = null;
+  simulate((x, v, dt) => {
+    if (!coasting && until != null && Math.abs(x - holdFrom) >= until) coasting = coast(x, v);
+    if (coasting) return coasting(x, v, dt);
+    let nv = v + (full - v) * (1 - Math.exp(-dt / RAMP));
+    // Land exactly on full speed so the steps become constant.
+    if (Math.abs(full - nv) < Math.abs(full) * 0.01) nv = full;
+    return [x + nv * dt, nv];
+  });
 }
 
-// Held key (j/k): repeated keydowns for the same direction are no-ops.
+// The public calls record the intent at once and plan the motion at the next
+// frame (see atFrame in viewport.js).
+
 export function holdStart(dir) {
-  if (holdDir === dir && !releasing) return;
-  target = null;
-  if (holdDir !== dir) velocity = 0;
+  if (holdDir === dir) return;
+  jumpTarget = null;
+  wheelTarget = null;
   holdDir = dir;
-  releasing = false;
-  travelled = 0;
-  ensureLoop();
+  vp.atFrame(() => {
+    holdFrom = vp.y(vp.handoffTime());
+    hold(dir);
+  });
 }
 
 export function holdEnd(dir) {
-  if (dir === undefined || holdDir === dir) releasing = true;
+  if (!holdDir || (dir !== undefined && holdDir !== dir)) return;
+  const d = holdDir;
+  holdDir = 0;
+  vp.atFrame(() => {
+    // A tap still covers MIN_STEP before easing out.
+    const th = vp.handoffTime();
+    if (Math.abs(vp.y(th) - holdFrom) < MIN_STEP) hold(d, MIN_STEP);
+    else simulate(coast(vp.y(th), vp.velocity(th)));
+  });
 }
 
 export function jumpBy(dy) {
-  const base = rafId && target != null ? target : window.scrollY;
-  holdDir = 0;
-  velocity = 0;
-  target = clamp(base + dy);
-  ensureLoop();
+  const base = jumpTarget != null && vp.isMoving() ? jumpTarget : vp.y();
+  jumpTo(base + dy);
 }
 
 export function jumpTo(y) {
   holdDir = 0;
-  velocity = 0;
-  target = clamp(y);
-  ensureLoop();
+  wheelTarget = null;
+  const target = Math.round(vp.clampY(y));
+  jumpTarget = target;
+  vp.atFrame(() => simulate(settle(vp.y(vp.handoffTime()), vp.velocity(vp.handoffTime()), target, JUMP_TAU)));
 }
 
-// Wheel/trackpad input takes over immediately.
+// Wheel/trackpad: follow the accumulated target with a short smoothing, so a
+// late frame on the page side never stops the content. Events within a frame
+// add up into one motion.
+let wheelQueued = false;
+let lastWheelPlan = -Infinity;
+const WHEEL_EVERY = 3; // frames between wheel retargets
+
+export function wheel(dy) {
+  holdDir = 0;
+  jumpTarget = null;
+  const base = wheelTarget != null && vp.isMoving() ? wheelTarget : vp.y();
+  wheelTarget = Math.round(vp.clampY(base + dy));
+  if (wheelQueued) return;
+  wheelQueued = true;
+  const run = () => {
+    // Every replaced motion starts up to a few ms off in Core Animation, so
+    // retarget at most every WHEEL_EVERY frames; input in between adds up.
+    if (vp.now() - lastWheelPlan < (WHEEL_EVERY - 0.5) * vp.framePeriod()) {
+      vp.atFrame(run);
+      return;
+    }
+    wheelQueued = false;
+    lastWheelPlan = vp.now();
+    if (wheelTarget != null) simulate(settle(vp.y(vp.handoffTime()), vp.velocity(vp.handoffTime()), wheelTarget, WHEEL_TAU));
+  };
+  vp.atFrame(run);
+}
+
 export function cancel() {
   holdDir = 0;
-  velocity = 0;
-  target = null;
-  if (rafId) {
-    cancelAnimationFrame(rafId);
-    rafId = 0;
-    lastT = null;
-  }
+  jumpTarget = null;
+  wheelTarget = null;
+  wheelQueued = false;
+  if (vp.isMoving()) vp.stop();
 }
 
 // One "line" for scroll requests from nvim (count-prefixed j/k): about one tap.

@@ -1,9 +1,9 @@
 // Per-vsync probe for the preview's scroll smoothness, injected into Neovide with
 // DYLD_INSERT_LIBRARIES (the ad-hoc signed build has no hardened runtime).
 //
-// At every display-link tick it logs where WebKit's RenderView layer sits in the UI
-// process, i.e. which scroll position had been committed by that vsync. A frame whose
-// commit missed its vsync shows up as a 0 step followed by a double one. SIGHUP toggles
+// At every display-link tick it logs where the page content sits in the UI process: the
+// #content layer (moved by viewport.js) or, without one, WebKit's RenderView (native
+// scrolling). A frame that missed its vsync shows up as a 0 step followed by a double one. SIGHUP toggles
 // recording; stopping writes "<timestamp>\t<y>" rows to $PROBE_OUT. See ../../CLAUDE.md.
 //
 //   clang -dynamiclib -fobjc-arc -framework AppKit -framework QuartzCore probe.m -o probe.dylib
@@ -25,10 +25,15 @@ static NSView *findWeb(NSView *v) {
   return nil;
 }
 
-static CALayer *findRV(CALayer *l) {
-  if ([l.name hasPrefix:@"RenderView"]) return l;
-  for (CALayer *s in l.sublayers) { CALayer *r = findRV(s); if (r) return r; }
+static CALayer *findNamed(CALayer *l, BOOL (^match)(NSString *)) {
+  if (l.name && match(l.name)) return l;
+  for (CALayer *s in l.sublayers) { CALayer *r = findNamed(s, match); if (r) return r; }
   return nil;
+}
+
+static CALayer *findContent(CALayer *root) {
+  CALayer *c = findNamed(root, ^BOOL(NSString *n) { return [n containsString:@"id='content'"]; });
+  return c ?: findNamed(root, ^BOOL(NSString *n) { return [n hasPrefix:@"RenderView"]; });
 }
 
 @implementation MDProbe
@@ -40,7 +45,7 @@ static CALayer *findRV(CALayer *l) {
     if (!web) return;
   }
   CALayer *root = web.layer;
-  CALayer *rv = findRV(root);
+  CALayer *rv = findContent(root);
   if (!rv) return;
   CALayer *pr = root.presentationLayer ?: root;
   CALayer *rp = rv.presentationLayer ?: rv;

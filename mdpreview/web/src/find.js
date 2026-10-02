@@ -1,5 +1,6 @@
 // In-preview search: wraps matches in <mark class="find-match"> and cycles
 // through them. Re-applied after every content update.
+import * as vp from './viewport.js';
 
 let query = '';
 let current = -1;
@@ -62,7 +63,7 @@ function focusMatch(marks, index) {
   current = ((index % marks.length) + marks.length) % marks.length;
   const mark = marks[current];
   mark.classList.add('current');
-  mark.scrollIntoView({ block: 'center', behavior: 'instant' });
+  vp.setY(vp.pageTop(mark) + (mark.offsetHeight - vp.viewHeight()) / 2);
 }
 
 function firstVisibleIndex(marks, backwards) {

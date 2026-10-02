@@ -1,5 +1,8 @@
 // Source line <-> scroll offset mapping. Port of VSCode's
 // extensions/markdown-language-features/preview-src/scroll-sync.ts (MIT).
+//
+// Offsets are page offsets: px from the top of #content, which viewport.js
+// moves with a transform instead of scrolling the document.
 
 let cachedElements = null;
 
@@ -28,17 +31,22 @@ function getCodeLineElements() {
   return cachedElements;
 }
 
+const originTop = () => document.getElementById('content').getBoundingClientRect().top;
+
+// Page-offset bounds of a code-line element.
 function getElementBounds({ element }) {
+  if (element === document.body) return { top: 0, height: 0 };
+  const origin = originTop();
   const myBounds = element.getBoundingClientRect();
+  const top = myBounds.top - origin;
   // Some code-line elements contain other code-line elements (blockquotes,
   // list items). Use the distance to the first child as the height.
   const codeLineChild = element.querySelector('.code-line');
   if (codeLineChild) {
     const childBounds = codeLineChild.getBoundingClientRect();
-    const height = Math.max(1, childBounds.top - myBounds.top);
-    return { top: myBounds.top, height };
+    return { top, height: Math.max(1, childBounds.top - myBounds.top) };
   }
-  return myBounds;
+  return { top, height: myBounds.height };
 }
 
 // Elements bracketing `targetLine` (0-based source line).
@@ -60,7 +68,7 @@ export function getElementsForSourceLine(targetLine) {
 function getLineElementsAtPageOffset(offset) {
   const lines = getCodeLineElements().filter((x) => x.element !== document.body);
   if (lines.length === 0) return {};
-  const position = offset - window.scrollY;
+  const position = offset;
   let lo = -1;
   let hi = lines.length - 1;
   while (lo + 1 < hi) {
@@ -95,13 +103,13 @@ export function offsetForSourceLine(line) {
     // Between two elements: interpolate.
     const betweenProgress = (line - previous.line) / (next.line - previous.line);
     const previousEnd = previousTop + rect.height;
-    const betweenHeight = next.element.getBoundingClientRect().top - previousEnd;
+    const betweenHeight = getElementBounds(next).top - previousEnd;
     scrollTo = previousEnd + betweenProgress * betweenHeight;
   } else {
     const progressInElement = line - Math.floor(line);
     scrollTo = previousTop + rect.height * progressInElement;
   }
-  return Math.max(0, window.scrollY + scrollTo);
+  return Math.max(0, scrollTo);
 }
 
 // Fractional source line shown at page offset `offset`.
@@ -109,7 +117,7 @@ export function sourceLineForOffset(offset) {
   const { previous, next } = getLineElementsAtPageOffset(offset);
   if (!previous) return null;
   const previousBounds = getElementBounds(previous);
-  const offsetFromPrevious = offset - window.scrollY - previousBounds.top;
+  const offsetFromPrevious = offset - previousBounds.top;
   if (next) {
     const span = getElementBounds(next).top - previousBounds.top;
     const progress = span > 0 ? offsetFromPrevious / span : 0;

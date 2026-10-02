@@ -430,7 +430,7 @@ end
 
 function handlers.benchResult(_, msg)
   vim.g.mdpreview_bench = msg
-  vim.notify(("mdpreview: %d fps (median %.1f ms, p95 %.1f ms, max %.1f ms, %d frames), step %d px, %d/%d uneven"):format(
+  vim.notify(("mdpreview: %d fps (median %.1f ms, p95 %.1f ms, max %.1f ms, %d frames), step %g px, %d/%d uneven"):format(
     msg.fps, msg.median, msg.p95, msg.max, msg.frames, msg.step or 0, msg.uneven or 0, msg.steady or 0))
 end
 

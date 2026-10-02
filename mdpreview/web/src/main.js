@@ -9,6 +9,7 @@ import {
 import { fillCached, keepStaleDiagram, renderPending, setMermaidMode } from './mermaid.js';
 import { find, findNext, clearFind, reapplyFind, hasFind } from './find.js';
 import * as scroller from './scroller.js';
+import * as vp from './viewport.js';
 import { LINE_STEP } from './scroller.js';
 
 const content = () => document.getElementById('content');
@@ -99,15 +100,22 @@ function update(text, { full = false } = {}) {
 
 // ------------------------------------------------------------- scroll sync
 
+// Programmatic scrolls; nvim sees them as echoes, not as user scrolling.
 function scrollToY(y, behavior = 'instant') {
-  state.suppressScrollUntil = performance.now() + (behavior === 'smooth' ? 600 : 80);
-  window.scrollTo({ top: y, behavior });
+  if (behavior === 'smooth') {
+    state.suppressScrollUntil = performance.now() + 600;
+    scroller.jumpTo(y);
+  } else {
+    state.suppressScrollUntil = performance.now() + 80;
+    scroller.cancel();
+    vp.setY(y);
+  }
 }
 
 function followEditor(line) {
   state.followLine = line;
   const y = offsetForSourceLine(line);
-  if (y != null && Math.abs(y - window.scrollY) > 1) scrollToY(y);
+  if (y != null && Math.abs(y - vp.y()) > 1) scrollToY(y);
 }
 
 function refollow() {
@@ -126,7 +134,6 @@ function markActiveLine() {
 // While scrolling, nvim only needs whole-line changes (it scrolls the source
 // window by lines); the exact fractional line follows once scrolling settles.
 // A message per frame would cost an IPC round through Neovide every frame.
-let scrollQueued = false;
 let scrollEcho = false;
 let lastPosted = null;
 let settleTimer = 0;
@@ -136,7 +143,7 @@ function postScrolled(exact) {
   // A user scroll (wheel/keys) detaches the preview from the editor
   // position until nvim scrolls again.
   if (!echo) state.followLine = null;
-  const line = sourceLineForOffset(window.scrollY);
+  const line = sourceLineForOffset(vp.y());
   if (line == null) return;
   const key = `${Math.floor(line)}:${echo}`;
   if (!exact && key === lastPosted) return;
@@ -144,18 +151,14 @@ function postScrolled(exact) {
   post({ type: 'scrolled', line, echo });
 }
 
-window.addEventListener('scroll', () => {
+// Called every frame while the view moves, and on jumps.
+vp.onChange(() => {
   // Decided when the scroll happens: the settle post runs after the window.
   scrollEcho = performance.now() < state.suppressScrollUntil;
   clearTimeout(settleTimer);
   settleTimer = setTimeout(() => postScrolled(true), 100);
-  if (scrollQueued) return;
-  scrollQueued = true;
-  requestAnimationFrame(() => {
-    scrollQueued = false;
-    postScrolled(false);
-  });
-}, { passive: true });
+  postScrolled(false);
+});
 
 // Late-loading images shift the layout under a followed position.
 document.addEventListener('load', (e) => {
@@ -172,8 +175,15 @@ window.addEventListener('resize', () => {
 const page = () => window.innerHeight;
 const fullPage = () => page() - 2 * LINE_STEP;
 
-// Wheel/trackpad scrolling takes over from keyboard animations.
-window.addEventListener('wheel', () => scroller.cancel(), { passive: true });
+// Wheel/trackpad scrolling goes through the same compositor-driven motion.
+// Horizontal scrolling (wide code blocks, tables) stays native.
+window.addEventListener('wheel', (e) => {
+  if (Math.abs(e.deltaY) < Math.abs(e.deltaX)) return;
+  e.preventDefault();
+  state.followLine = null;
+  const unit = e.deltaMode === 1 ? 40 : e.deltaMode === 2 ? page() : 1;
+  scroller.wheel(e.deltaY * unit);
+}, { passive: false });
 
 // Scroll requests from nvim (its mappings run when the webview lacks focus).
 function scrollAction(action, n = 1) {
@@ -195,10 +205,10 @@ function scrollAction(action, n = 1) {
       scroller.jumpTo(Infinity);
       break;
     case 'toline':
-      scroller.cancel();
-      scrollToY(offsetForSourceLine(n) ?? 0, 'instant');
       // Not an echo: nvim needs this position to return to the code.
       state.suppressScrollUntil = 0;
+      scroller.cancel();
+      vp.setY(offsetForSourceLine(n) ?? 0);
       break;
   }
 }
@@ -243,7 +253,7 @@ function lineAtEvent(e) {
     }
     return base;
   }
-  const line = sourceLineForOffset(window.scrollY + e.clientY);
+  const line = sourceLineForOffset(vp.y() + e.clientY);
   return line == null ? 0 : Math.floor(line);
 }
 
@@ -271,7 +281,7 @@ document.addEventListener('click', (e) => {
       const target = document.getElementById(id) ?? document.getElementsByName(id)[0];
       if (target) {
         state.followLine = null;
-        scrollToY(target.getBoundingClientRect().top + window.scrollY - 8, 'smooth');
+        scrollToY(vp.pageTop(target) - 8, 'smooth');
       }
     } else if (href) {
       post({ type: 'link', href });
@@ -443,43 +453,44 @@ document.addEventListener('keyup', (e) => {
 window.addEventListener('blur', () => scroller.holdEnd());
 
 // Diagnostics: frame pacing of a 1 s held-key scroll (`:MdPreview bench`).
-// `uneven` counts full-speed frames whose scroll step differs from the median
-// step: on screen those read as judder even at a perfect frame rate.
+// fps is the page's rAF rate (the compositor plays the motion regardless);
+// `uneven` counts full-speed frames of the planned motion whose step differs
+// from the median. What reaches the screen: test/vsync-probe.
 function bench() {
   const gaps = [];
-  const steps = [];
   scroller.cancel();
-  window.scrollTo(0, 0);
+  vp.setY(0);
   setTimeout(() => {
     const start = performance.now();
     let last = start;
-    let lastY = window.scrollY;
     scroller.holdStart(1);
+    let plan = null;
     const tick = (t) => {
+      plan ??= vp.plan();
       gaps.push(t - last);
       last = t;
-      // Steps once full speed is reached (the ramp takes ~0.3 s).
-      if (t - start > 400) steps.push(window.scrollY - lastY);
-      lastY = window.scrollY;
       if (t - start < 1300) {
         requestAnimationFrame(tick);
-      } else {
-        scroller.holdEnd(1);
-        const g = gaps.slice(2).sort((a, b) => a - b);
-        const mean = g.reduce((a, b) => a + b, 0) / g.length;
-        const stepMedian = [...steps].sort((a, b) => a - b)[steps.length >> 1];
-        post({
-          type: 'benchResult',
-          fps: Math.round(1000 / mean),
-          median: +g[g.length >> 1].toFixed(2),
-          p95: +g[Math.floor(g.length * 0.95)].toFixed(2),
-          max: +g[g.length - 1].toFixed(2),
-          frames: g.length,
-          step: stepMedian,
-          uneven: steps.filter((d) => Math.abs(d - stepMedian) > 0.5).length,
-          steady: steps.length,
-        });
+        return;
       }
+      scroller.holdEnd(1);
+      const g = gaps.slice(2).sort((a, b) => a - b);
+      const mean = g.reduce((a, b) => a + b, 0) / g.length;
+      // Steps once full speed is reached (the ramp takes ~0.3 s).
+      const xs = plan.xs.slice(Math.ceil(400 / plan.h), Math.floor(1300 / plan.h));
+      const steps = xs.slice(1).map((x, i) => x - xs[i]);
+      const stepMedian = [...steps].sort((a, b) => a - b)[steps.length >> 1];
+      post({
+        type: 'benchResult',
+        fps: Math.round(1000 / mean),
+        median: +g[g.length >> 1].toFixed(2),
+        p95: +g[Math.floor(g.length * 0.95)].toFixed(2),
+        max: +g[g.length - 1].toFixed(2),
+        frames: g.length,
+        step: +stepMedian.toFixed(2),
+        uneven: steps.filter((d) => Math.abs(d - stepMedian) > 0.01).length,
+        steady: steps.length,
+      });
     };
     requestAnimationFrame(tick);
   }, 300);
@@ -543,4 +554,7 @@ window.nvimPreview = { receive };
 // Neovide's webview bridge delivers messages as JSON strings.
 window.neovideReceive = (message) => receive(JSON.parse(message));
 
-document.addEventListener('DOMContentLoaded', () => post({ type: 'ready' }));
+document.addEventListener('DOMContentLoaded', () => {
+  vp.init();
+  post({ type: 'ready' });
+});

@@ -1,13 +1,14 @@
 /* Page chrome shared by all themes. Colours come from the GitHub variable
  * set (--fgColor-*, --bgColor-*, --borderColor-*), which every theme fills. */
 
+/* The document never scrolls: viewport.js moves #content with compositor
+ * animations (see the comment there). `clip` keeps the overflowing content
+ * from making the root scrollable, even programmatically. */
 html, body {
   margin: 0;
   padding: 0;
-}
-
-body {
-  min-height: 100vh;
+  height: 100%;
+  overflow: clip;
 }
 
 #content {
@@ -16,19 +17,28 @@ body {
   margin: 0 auto;
   padding: var(--page-padding, 32px 45px 50vh);
   background: transparent;
+  /* Its own layer at rest too: no repaint when a motion starts or ends. */
+  will-change: transform;
 }
 
-/* Scrollbar in theme colours. The track must be opaque: the webview does not
- * draw a background of its own, so a transparent gutter shows Neovide behind. */
-::-webkit-scrollbar { width: 10px; height: 10px; }
-::-webkit-scrollbar-track,
-::-webkit-scrollbar-corner { background: var(--page-bg); }
-::-webkit-scrollbar-thumb {
-  background: var(--scrollbar-thumb, rgba(128, 128, 128, .35));
-  border-radius: 5px;
-  border: 2px solid var(--page-bg);
+/* Scrollbar in theme colours, drawn by viewport.js. */
+.vscroll {
+  position: fixed;
+  top: 0;
+  right: 0;
+  width: 10px;
+  height: 100%;
 }
-::-webkit-scrollbar-thumb:hover { background: rgba(128, 128, 128, .6); }
+.vscroll-thumb {
+  position: absolute;
+  top: 0;
+  left: 2px;
+  right: 2px;
+  border-radius: 3px;
+  background: var(--scrollbar-thumb, rgba(128, 128, 128, .35));
+  will-change: transform;
+}
+.vscroll-thumb:hover { background: rgba(128, 128, 128, .6); }
 
 ::selection { background: var(--selection-bg, var(--bgColor-attention-muted)); }
 
