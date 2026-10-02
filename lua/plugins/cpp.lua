@@ -3,7 +3,8 @@
 --   clangd_extensions.nvim       — AST view, symbol info, memory usage
 --   cmake-tools.nvim             — configure/build/run/debug targets, kits, build types
 --   conform.nvim                 — clang-format with .clang-format detection
---   neotest + neotest-vim-test   — universal test runner (Catch2 by default)
+--   neotest + neotest-vim-test   — universal test runner (Catch2 by default);
+--                                  core spec in lua/plugins/neotest.lua
 --   nvim-dap config              — wired to cmake-tools launch target
 --
 -- All C++ specifics are colocated here. Keymaps are buffer-local via LspAttach
@@ -168,47 +169,11 @@ return {
     end,
   },
 
-  ----------------------------------------------------------------------------
-  -- 4. Test runner. neotest-vim-test gives universal coverage; vim-test
-  --    natively handles Catch2 via `g:test#cpp#runner = 'catch2'` (set in
-  --    lang/cpp.lua). Add language-specific adapters (e.g. neotest-gtest,
-  --    neotest-rust) to lang/cpp.lua's neotest_adapters() — fully extensible.
-  ----------------------------------------------------------------------------
-  {
-    "nvim-neotest/neotest",
-    ft = { "c", "cpp" },
-    dependencies = {
-      "nvim-lua/plenary.nvim",
-      "antoinemadec/FixCursorHold.nvim",
-      "nvim-treesitter/nvim-treesitter",
-      "nvim-neotest/nvim-nio",
-      "nvim-neotest/neotest-vim-test",
-      "vim-test/vim-test",
-    },
-    config = function()
-      require("neotest").setup({
-        adapters = require("lang.cpp").neotest_adapters(),
-        quickfix = { open = false },
-        status   = { virtual_text = true, signs = true },
-        output   = { open_on_run = false },
-        summary  = {
-          mappings = {
-            run        = "r",
-            debug      = "d",
-            stop       = "s",
-            expand     = { "<CR>", "<2-LeftMouse>" },
-            jumpto     = "i",
-            output     = "o",
-            short      = "O",
-            mark       = "m",
-            run_marked = "R",
-            target     = "t",
-          },
-        },
-      })
-    end,
-  },
-
+  -- Note: the neotest plugin spec moved to lua/plugins/neotest.lua once Go
+  -- joined it — the core is shared and each language contributes adapters
+  -- through its own `neotest_adapters()` (lang/cpp.lua, lang/go.lua).
+  -- C/C++ adapters are still defined in lang/cpp.lua; nothing else changed.
+  --
   -- Note: C/C++ keyword completion comes from lua/lang/cpp_keywords.lua
   -- (a native blink.cmp source). Signature help is owned by noice.nvim.
   --

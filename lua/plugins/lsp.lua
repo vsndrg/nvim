@@ -17,7 +17,11 @@ return {
         "lua_ls",
         -- clangd: managed by lua/plugins/cpp.lua (prefers Homebrew LLVM clangd).
         -- "jdtls",
-        "rust_analyzer",
+        -- rust_analyzer: intentionally not managed by mason. mason prepends its
+        -- bin dir to PATH, so a mason copy would shadow the rustup component
+        -- (`rustup component add rust-analyzer`), which always matches rustc.
+        -- gopls: same reasoning — installed with `go install`, so it is always
+        -- built by the active Go toolchain. Managed by lua/lang/go.lua.
         "pyright",
         -- "svls",
         "verible",
@@ -165,6 +169,7 @@ return {
       })
 
       -- rust_analyzer managed by rustaceanvim (lua/plugins/rust.lua)
+      -- gopls managed by lua/lang/go.lua (orchestrated by lua/plugins/go.lua).
 
       vim.diagnostic.config({
         float = { border = "rounded" }
