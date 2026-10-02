@@ -6,5 +6,8 @@ return {
         theme = 'dracula'
       }
     })
+    require('lualine').hide()
+    vim.o.laststatus = 0
+    vim.o.cmdheight  = 0
   end
 }

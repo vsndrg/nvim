@@ -85,12 +85,14 @@ end, { desc = 'Toggle inlay hints' })
 
 -- Toggle statusline visibility
 km.set('n', '<leader>u', function()
+  local ll = require('lualine')
   if vim.o.laststatus ~= 0 then
+    ll.hide()
     vim.o.laststatus = 0
     vim.o.cmdheight  = 0
   else
     vim.o.laststatus = 2
-    vim.o.cmdheight  = 1
+    ll.hide({ unhide = true })
   end
 end, { desc = 'Toggle statusline' })
 

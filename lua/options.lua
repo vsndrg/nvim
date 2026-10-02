@@ -2,6 +2,10 @@ vim.opt.clipboard:append("unnamedplus")
 vim.opt.guifont = { "JetBrainsMono Nerd Font", ":h14" }
 
 vim.opt.pumheight = 12
+
+-- Hide statusline by default; <leader>u toggles lualine on/off.
+vim.o.laststatus = 0
+vim.o.cmdheight  = 0
 vim.opt.shortmess:append("F")
 
 vim.o.number = true
@@ -31,7 +35,7 @@ vim.o.guicursor = 'n-v-c-sm:block,i-ci-ve:ver25,r-cr-o:hor20,t:ver25'
 
 vim.g.neovide_input_macos_option_key_is_meta = "both"
 vim.g.neovide_cursor_antialiasing = true
-vim.g.neovide_macos_simple_fullscreen = true
+-- vim.g.neovide_macos_simple_fullscreen = true
 -- vim.g.neovide_profiler = true
 -- vim.g.neovide_fullscreen = true
 -- vim.g.neovide_cursor_smooth_blink = true
@@ -41,17 +45,24 @@ vim.g.neovide_macos_simple_fullscreen = true
 if vim.g.neovide then
   vim.g.neovide_refresh_rate = 120
   -- vim.g.neovide_scroll_animation_far_lines = 0
-  vim.g.neovide_floating_blur_amount_x = 4.0
-  vim.g.neovide_floating_blur_amount_y = 4.0
+  -- vim.g.neovide_floating_blur_amount_x = 4.0
+  -- vim.g.neovide_floating_blur_amount_y = 4.0
   vim.g.neovide_floating_shadow = true
-  vim.g.neovide_opacity = 0.9
-  vim.g.neovide_window_blurred = true
+  -- vim.g.neovide_opacity = 0.9
+  -- vim.g.neovide_window_blurred = true
   -- vim.g.neovide_cursor_animation_length = 0.08
   -- vim.g.neovide_scroll_animation_length = 0.2
   -- vim.g.neovide_cursor_trail_size = 0.5
   vim.keymap.set('c', '<D-v>', '<C-R>+', { noremap = true })
   vim.keymap.set('i', '<D-v>', '<C-R>+', { noremap = true })
   vim.keymap.set('t', '<D-v>', '<C-\\><C-n>"+pi', { noremap = true })
+
+  -- -- 1. главный виновник: Neovim умножает каждое событие скролла на 3
+  -- vim.o.mousescroll = "ver:1,hor:6"      -- по умолчанию ver:3
+  --
+  -- -- 2. инерционное сглаживание именно скролла (курсор/окна не трогает)
+  -- vim.g.neovide_scroll_animation_length = 0
+  -- vim.g.neovide_scroll_animation_far_lines = 0
 end
 
 vim.g.python3_host_prog = os.getenv("HOME") .. "/.local/share/venvs/pynvim/bin/python"

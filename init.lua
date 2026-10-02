@@ -20,6 +20,7 @@ require("options")
 require("keymaps")
 require("autocmds")
 require("windows")
+require("diag.cursor_lag").setup()
 require("lazy").setup("plugins", {
   change_detection = {
     enabled = true,

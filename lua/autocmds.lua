@@ -6,10 +6,13 @@
 -- vim.schedule, чтобы избежать reentrant-удаления: TermClose вызывается
 -- из контекста, где буфер уже "in use" (напр. изнутри :%bw! при восстановлении
 -- сессии auto-session'ом). Прямой nvim_buf_delete оттуда даёт E937 на [No Name].
+-- Буферы с b:keep_term_output переживают завершение процесса: вывод
+-- `go test` / `go build` должен оставаться читаемым после выхода команды
+-- (см. lua/lang/go.lua, run_in_split). Закрываются вручную по q / <Esc>.
 vim.api.nvim_create_autocmd("TermClose", {
   callback = function(ev)
     vim.schedule(function()
-      if vim.api.nvim_buf_is_valid(ev.buf) then
+      if vim.api.nvim_buf_is_valid(ev.buf) and not vim.b[ev.buf].keep_term_output then
         pcall(vim.api.nvim_buf_delete, ev.buf, { force = true })
       end
     end)
@@ -87,16 +90,16 @@ vim.api.nvim_create_autocmd({ "BufEnter", "WinEnter" }, {
 --   end
 -- })
 
-if vim.g.neovide then
-  vim.api.nvim_create_autocmd("FocusGained", {
-    callback = function()
-      vim.fn.system("sketchybar --bar hidden=true")
-    end,
-  })
-  vim.api.nvim_create_autocmd({ "FocusLost", "VimLeave" }, {
-    callback = function()
-      vim.fn.system("sketchybar --bar hidden=false")
-    end,
-  })
-end
+-- if vim.g.neovide then
+--   vim.api.nvim_create_autocmd("FocusGained", {
+--     callback = function()
+--       vim.fn.system("sketchybar --bar hidden=true")
+--     end,
+--   })
+--   vim.api.nvim_create_autocmd({ "FocusLost", "VimLeave" }, {
+--     callback = function()
+--       vim.fn.system("sketchybar --bar hidden=false")
+--     end,
+--   })
+-- end
 
