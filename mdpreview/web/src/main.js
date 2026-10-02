@@ -8,6 +8,8 @@ import {
 } from './scroll-sync.js';
 import { fillCached, keepStaleDiagram, renderPending, setMermaidMode } from './mermaid.js';
 import { find, findNext, clearFind, reapplyFind, hasFind } from './find.js';
+import * as scroller from './scroller.js';
+import { LINE_STEP } from './scroller.js';
 
 const content = () => document.getElementById('content');
 
@@ -20,6 +22,9 @@ const state = {
   cursorLine: null,
   // Scroll events before this timestamp are echoes of programmatic scrolls.
   suppressScrollUntil: 0,
+  // nvim gave the webview the keyboard (preview window is current): handle
+  // scrolling keys here instead of replaying them in nvim.
+  ownKeys: false,
 };
 
 function post(msg) {
@@ -145,35 +150,38 @@ window.addEventListener('resize', () => {
   refollow();
 });
 
+const page = () => window.innerHeight;
+const fullPage = () => page() - 2 * LINE_STEP;
+
+// Wheel/trackpad scrolling takes over from keyboard animations.
+window.addEventListener('wheel', () => scroller.cancel(), { passive: true });
+
+// Scroll requests from nvim (its mappings run when the webview lacks focus).
 function scrollAction(action, n = 1) {
-  const page = window.innerHeight;
-  const lineStep = 40;
   state.followLine = null;
   switch (action) {
     case 'line':
-      scrollToY(window.scrollY + n * lineStep, 'instant');
+      scroller.jumpBy(n * LINE_STEP);
       break;
     case 'halfpage':
-      scrollToY(window.scrollY + n * page / 2, 'smooth');
+      scroller.jumpBy(n * page() / 2);
       break;
     case 'page':
-      scrollToY(window.scrollY + n * (page - 2 * lineStep), 'smooth');
+      scroller.jumpBy(n * fullPage());
       break;
     case 'top':
-      scrollToY(0, 'smooth');
+      scroller.jumpTo(0);
       break;
     case 'bottom':
-      scrollToY(document.documentElement.scrollHeight, 'smooth');
+      scroller.jumpTo(Infinity);
       break;
     case 'toline':
+      scroller.cancel();
       scrollToY(offsetForSourceLine(n) ?? 0, 'instant');
+      // Not an echo: nvim needs this position to return to the code.
+      state.suppressScrollUntil = 0;
       break;
   }
-  // Report the final position even when scroll events were suppressed.
-  setTimeout(() => {
-    const line = sourceLineForOffset(window.scrollY);
-    if (line != null) post({ type: 'scrolled', line, echo: false });
-  }, action === 'line' || action === 'toline' ? 0 : 400);
 }
 
 // --------------------------------------------------------------- theming
@@ -226,6 +234,9 @@ function selectionText() {
 }
 
 function releaseFocus(key) {
+  // nvim hands the keyboard back explicitly (ownKeys) when appropriate.
+  state.ownKeys = false;
+  scroller.holdEnd();
   window.getSelection()?.removeAllRanges();
   post(key ? { type: 'blur', key } : { type: 'blur' });
 }
@@ -301,15 +312,94 @@ function nvimKey(e) {
   return key;
 }
 
+// Keys the preview handles itself while it has keyboard focus (nvim hands
+// focus to the webview whenever the preview window is current). Everything
+// else is replayed in nvim.
+let pendingG = false;
+
+function postFindResult(r) {
+  post({ type: 'findResult', ...r });
+}
+
+// Letter keys by physical position, so scrolling works in any keyboard layout.
+function layoutFreeKey(e) {
+  if (/^Key[A-Z]$/.test(e.code)) {
+    return e.shiftKey ? e.code[3] : e.code[3].toLowerCase();
+  }
+  return e.key;
+}
+
+function handlePreviewKey(e) {
+  const key = layoutFreeKey(e);
+  if (pendingG) {
+    pendingG = false;
+    if (key === 'g') {
+      scroller.jumpTo(0);
+      return true;
+    }
+    // Not "gg": give nvim the pending g as well.
+    releaseFocus('g' + (nvimKey(e) ?? ''));
+    return true;
+  }
+  switch (key) {
+    case 'j':
+    case 'ArrowDown':
+      state.followLine = null;
+      scroller.holdStart(1);
+      return true;
+    case 'k':
+    case 'ArrowUp':
+      state.followLine = null;
+      scroller.holdStart(-1);
+      return true;
+    case 'd':
+      scroller.jumpBy(page() / 2);
+      return true;
+    case 'u':
+      scroller.jumpBy(-page() / 2);
+      return true;
+    case 'f':
+    case 'PageDown':
+      scroller.jumpBy(fullPage());
+      return true;
+    case 'b':
+    case 'PageUp':
+      scroller.jumpBy(-fullPage());
+      return true;
+    case 'G':
+    case 'End':
+      scroller.jumpTo(Infinity);
+      return true;
+    case 'Home':
+      scroller.jumpTo(0);
+      return true;
+    case 'g':
+      pendingG = true;
+      return true;
+    case 'n':
+      postFindResult(findNext(content(), false));
+      return true;
+    case 'N':
+      postFindResult(findNext(content(), true));
+      return true;
+    case 'Escape':
+      clearFind(content());
+      window.getSelection()?.removeAllRanges();
+      return true;
+  }
+  return false;
+}
+
 document.addEventListener('keydown', (e) => {
   if (['Shift', 'Control', 'Alt', 'Meta', 'CapsLock'].includes(e.key)) return;
-  if (e.metaKey && !e.ctrlKey && !e.altKey && e.key.toLowerCase() === 'c') {
+  const cmdOnly = e.metaKey && !e.ctrlKey && !e.altKey;
+  if (cmdOnly && e.key.toLowerCase() === 'c') {
     e.preventDefault();
     const text = selectionText();
     if (text) post({ type: 'copy', text });
     return;
   }
-  if (e.metaKey && !e.ctrlKey && !e.altKey && e.key.toLowerCase() === 'a') {
+  if (cmdOnly && e.key.toLowerCase() === 'a') {
     e.preventDefault();
     const range = document.createRange();
     range.selectNodeContents(content());
@@ -319,8 +409,21 @@ document.addEventListener('keydown', (e) => {
     return;
   }
   e.preventDefault();
-  releaseFocus(e.key === 'Escape' ? undefined : nvimKey(e) ?? undefined);
+  const plain = !e.ctrlKey && !e.altKey && !e.metaKey;
+  if (state.ownKeys && plain && handlePreviewKey(e)) return;
+  // Focus came from a mouse selection: Esc just hands the keyboard back.
+  const replay = e.key === 'Escape' && !state.ownKeys ? undefined : nvimKey(e);
+  releaseFocus(replay ?? undefined);
 }, true);
+
+document.addEventListener('keyup', (e) => {
+  const key = layoutFreeKey(e);
+  if (key === 'j' || key === 'J' || key === 'ArrowDown') scroller.holdEnd(1);
+  if (key === 'k' || key === 'K' || key === 'ArrowUp') scroller.holdEnd(-1);
+}, true);
+
+// A lost keyup (focus moved mid-hold) must not leave the page scrolling.
+window.addEventListener('blur', () => scroller.holdEnd());
 
 // ------------------------------------------------------------ dispatcher
 
@@ -345,6 +448,11 @@ function receive(msg) {
     case 'cursor':
       state.cursorLine = msg.line;
       markActiveLine();
+      break;
+    case 'ownKeys':
+      state.ownKeys = !!msg.enabled;
+      pendingG = false;
+      if (!state.ownKeys) scroller.holdEnd();
       break;
     case 'activeLine':
       document.documentElement.classList.toggle('show-active-line', !!msg.enabled);

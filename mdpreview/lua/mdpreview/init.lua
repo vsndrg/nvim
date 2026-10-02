@@ -156,8 +156,32 @@ end
 local function close_session(s) end -- forward declaration, defined below
 local function set_mode(s, mode) end
 
+-- Keyboard focus: while the preview window is current (normal mode, nothing
+-- pending) the webview owns the keyboard, so j/k scroll from keydown to keyup
+-- without key-repeat delay. Keys it does not handle are replayed here.
+local function view_is_current(s)
+  return s.view and api.nvim_get_current_buf() == s.view
+end
+
+local function set_webview_focus(s, focus)
+  if s.focused == focus then
+    return
+  end
+  s.focused = focus
+  post(s, { type = "ownKeys", enabled = focus })
+  neovide.webview.focus(s.id, focus)
+end
+
+local function refocus(s)
+  if s.ready and view_is_current(s) and api.nvim_get_mode().mode == "n" then
+    set_webview_focus(s, true)
+  end
+end
+
+-- Fallback for keys that reached nvim (the webview did not have focus yet).
 local function scroll(s, action, n)
   post(s, { type = "scroll", action = action, n = n })
+  refocus(s)
 end
 
 local function find_prompt(s, backwards)
@@ -179,13 +203,12 @@ local function view_keymaps(s)
   map("<Up>", function() scroll(s, "line", -vim.v.count1) end, "Preview: scroll up")
   map("<C-e>", function() scroll(s, "line", vim.v.count1) end, "Preview: scroll down")
   map("<C-y>", function() scroll(s, "line", -vim.v.count1) end, "Preview: scroll up")
-  map("<C-d>", function() scroll(s, "halfpage", vim.v.count1) end, "Preview: half page down")
-  map("<C-u>", function() scroll(s, "halfpage", -vim.v.count1) end, "Preview: half page up")
-  map("<C-f>", function() scroll(s, "page", vim.v.count1) end, "Preview: page down")
-  map("<C-b>", function() scroll(s, "page", -vim.v.count1) end, "Preview: page up")
+  map("d", function() scroll(s, "halfpage", vim.v.count1) end, "Preview: half page down")
+  map("u", function() scroll(s, "halfpage", -vim.v.count1) end, "Preview: half page up")
+  map("f", function() scroll(s, "page", vim.v.count1) end, "Preview: page down")
+  map("b", function() scroll(s, "page", -vim.v.count1) end, "Preview: page up")
   map("<PageDown>", function() scroll(s, "page", 1) end, "Preview: page down")
   map("<PageUp>", function() scroll(s, "page", -1) end, "Preview: page up")
-  map("<Space>", function() scroll(s, "page", 1) end, "Preview: page down")
   map("gg", function() scroll(s, "top") end, "Preview: top")
   map("G", function() scroll(s, "bottom") end, "Preview: bottom")
   map("/", function() find_prompt(s, false) end, "Preview: search")
@@ -393,7 +416,9 @@ function handlers.copy(_, msg)
   vim.notify(("mdpreview: copied %d characters"):format(vim.fn.strchars(msg.text)))
 end
 
-function handlers.blur(_, msg)
+function handlers.blur(s, msg)
+  -- Neovide already returned first responder to the editor view.
+  s.focused = false
   if msg.key then
     api.nvim_input(msg.key)
   end
@@ -500,6 +525,23 @@ local function attach_autocmds(s)
           M.retarget(s, ev.buf)
         end
       end)
+    end,
+  })
+
+  api.nvim_create_autocmd("SafeState", {
+    group = group,
+    callback = function()
+      if not s.focused then
+        refocus(s)
+      end
+    end,
+  })
+  api.nvim_create_autocmd("WinLeave", {
+    group = group,
+    callback = function()
+      if view_is_current(s) then
+        set_webview_focus(s, false)
+      end
     end,
   })
 
@@ -689,6 +731,15 @@ function M.close_all()
   for _, s in pairs(vim.tbl_values(sessions)) do
     close_session(s)
   end
+end
+
+-- Session state for debugging (`:lua =require('mdpreview').status()`).
+function M.status()
+  local out = {}
+  for src, s in pairs(sessions) do
+    table.insert(out, { id = s.id, src = api.nvim_buf_get_name(src), mode = s.mode, ready = s.ready, focused = s.focused })
+  end
+  return out
 end
 
 function M.set_theme(name)
