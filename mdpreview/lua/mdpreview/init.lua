@@ -163,13 +163,20 @@ local function view_is_current(s)
   return s.view and api.nvim_get_current_buf() == s.view
 end
 
+-- Keys the page handles itself (see handlePreviewKey in web/src/main.js).
+-- Neovide routes every other key straight back to nvim, in order.
+local PAGE_KEYS = {
+  "j", "k", "d", "u", "f", "b", "g", "G", "n", "N",
+  "<Esc>", "<Up>", "<Down>", "<PageUp>", "<PageDown>", "<Home>", "<End>",
+}
+
 local function set_webview_focus(s, focus)
   if s.focused == focus then
     return
   end
   s.focused = focus
   post(s, { type = "ownKeys", enabled = focus })
-  neovide.webview.focus(s.id, focus)
+  neovide.webview.focus(s.id, focus, focus and PAGE_KEYS or nil)
 end
 
 local function refocus(s)
@@ -416,12 +423,9 @@ function handlers.copy(_, msg)
   vim.notify(("mdpreview: copied %d characters"):format(vim.fn.strchars(msg.text)))
 end
 
-function handlers.blur(s, msg)
-  -- Neovide already returned first responder to the editor view.
+function handlers.blur(s)
+  -- Neovide already returned the keyboard to nvim (and replayed msg.key in order).
   s.focused = false
-  if msg.key then
-    api.nvim_input(msg.key)
-  end
 end
 
 function handlers.benchResult(_, msg)
@@ -743,7 +747,14 @@ end
 function M.status()
   local out = {}
   for src, s in pairs(sessions) do
-    table.insert(out, { id = s.id, src = api.nvim_buf_get_name(src), mode = s.mode, ready = s.ready, focused = s.focused })
+    table.insert(out, {
+      id = s.id,
+      src = api.nvim_buf_get_name(src),
+      mode = s.mode,
+      ready = s.ready,
+      focused = s.focused,
+      preview_line = s.preview_line,
+    })
   end
   return out
 end

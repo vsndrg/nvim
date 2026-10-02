@@ -315,7 +315,7 @@ function nvimKey(e) {
 // Keys the preview handles itself while it has keyboard focus (nvim hands
 // focus to the webview whenever the preview window is current). Everything
 // else is replayed in nvim.
-let pendingG = false;
+let pendingG = 0; // timestamp of a lone g
 
 function postFindResult(r) {
   post({ type: 'findResult', ...r });
@@ -331,14 +331,12 @@ function layoutFreeKey(e) {
 
 function handlePreviewKey(e) {
   const key = layoutFreeKey(e);
-  if (pendingG) {
-    pendingG = false;
-    if (key === 'g') {
-      scroller.jumpTo(0);
-      return true;
-    }
-    // Not "gg": give nvim the pending g as well.
-    releaseFocus('g' + (nvimKey(e) ?? ''));
+  // "gg" needs both presses within the mapping timeout; any other key in
+  // between (routed to nvim by Neovide) leaves a stale g behind.
+  const gPending = pendingG && performance.now() - pendingG < 1000;
+  pendingG = 0;
+  if (gPending && key === 'g') {
+    scroller.jumpTo(0);
     return true;
   }
   switch (key) {
@@ -374,7 +372,7 @@ function handlePreviewKey(e) {
       scroller.jumpTo(0);
       return true;
     case 'g':
-      pendingG = true;
+      pendingG = performance.now();
       return true;
     case 'n':
       postFindResult(findNext(content(), false));
@@ -486,7 +484,7 @@ function receive(msg) {
       break;
     case 'ownKeys':
       state.ownKeys = !!msg.enabled;
-      pendingG = false;
+      pendingG = 0;
       if (!state.ownKeys) scroller.holdEnd();
       break;
     case 'activeLine':

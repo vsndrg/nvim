@@ -81,10 +81,10 @@ index 7397643..65ad6a7 100644
  uzers = "0.12.1"
  
 diff --git a/lua/init.lua b/lua/init.lua
-index f906f9b..f8090b7 100644
+index f906f9b..f93baf5 100644
 --- a/lua/init.lua
 +++ b/lua/init.lua
-@@ -311,6 +311,53 @@ M.private.can_set_background = function()
+@@ -311,6 +311,58 @@ M.private.can_set_background = function()
      end
  end
  
@@ -92,6 +92,8 @@ index f906f9b..f8090b7 100644
 +-- moved with it every frame, hidden while the window is not displayed, and masked below floating
 +-- windows. Page script receives messages through `window.neovideReceive(string)` and replies with
 +-- `window.webkit.messageHandlers.neovide.postMessage(string)`, delivered to `on_message[id]`.
++-- The message `{"type":"blur","key":"<keys>"}` is also handled by Neovide itself: keyboard focus
++-- returns to Nvim and `key` (optional, Nvim key notation) is fed to Nvim in order with typed keys.
 +M.webview = {
 +    ---@type table<integer, fun(message: string)>
 +    on_message = {},
@@ -118,8 +120,11 @@ index f906f9b..f8090b7 100644
 +
 +---@param id integer
 +---@param focus boolean give keyboard focus to the webview (true) or back to Nvim (false)
-+M.webview.focus = function(id, focus)
-+    pcall(rpcnotify, "neovide.webview.focus", id, focus)
++---@param keys? string[] keys (Nvim notation, e.g. "j", "G", "<PageDown>") the page receives while
++---  focused; any other key returns focus to Nvim and is processed there. Cmd+C/Cmd+A always
++---  reach the page.
++M.webview.focus = function(id, focus, keys)
++    pcall(rpcnotify, "neovide.webview.focus", id, focus, keys or {})
 +end
 +
 +---@param id integer
@@ -206,7 +211,7 @@ index 3b22383..80abcc3 100644
      #[test]
      fn message_kind_marks_error_variants() {
 diff --git a/src/bridge/handler.rs b/src/bridge/handler.rs
-index 800e48b..32944ee 100644
+index 800e48b..b54852d 100644
 --- a/src/bridge/handler.rs
 +++ b/src/bridge/handler.rs
 @@ -25,7 +25,7 @@ use crate::{
@@ -233,7 +238,7 @@ index 800e48b..32944ee 100644
              "neovide.exec_detach_handler" => {
                  send_ui(ParallelCommand::Quit, self);
              }
-@@ -345,6 +353,23 @@ fn parse_force_click_args(
+@@ -345,6 +353,30 @@ fn parse_force_click_args(
      Some((col, row, entity, guifont, kind))
  }
  
@@ -248,7 +253,14 @@ index 800e48b..32944ee 100644
 +        },
 +        "set_window" => WebviewCommand::SetWindow { id, winid: arg(1)?.as_u64()? },
 +        "post" => WebviewCommand::Post { id, message: arg(1)?.as_str()?.to_string() },
-+        "focus" => WebviewCommand::Focus { id, focus: arg(1)?.as_bool()? },
++        "focus" => WebviewCommand::Focus {
++            id,
++            focus: arg(1)?.as_bool()?,
++            keys: arg(2)
++                .and_then(Value::as_array)
++                .map(|keys| keys.iter().filter_map(|k| k.as_str().map(str::to_owned)).collect())
++                .unwrap_or_default(),
++        },
 +        "close" => WebviewCommand::Close { id },
 +        _ => return None,
 +    })
@@ -311,7 +323,7 @@ index b4e486a..4090413 100644
              RedrawEvent::WindowFloatPosition {
                  grid,
 diff --git a/src/platform/macos/mod.rs b/src/platform/macos/mod.rs
-index cba9ade..208d049 100644
+index cba9ade..85af79c 100644
 --- a/src/platform/macos/mod.rs
 +++ b/src/platform/macos/mod.rs
 @@ -1,5 +1,9 @@
@@ -324,7 +336,7 @@ index cba9ade..208d049 100644
  
  pub use switcher::{
      EditorSwitcherRow, close_editor_switcher_if_open, editor_switcher_key_event_matches,
-@@ -351,9 +355,32 @@ pub struct MacosWindowFeature {
+@@ -351,9 +355,34 @@ pub struct MacosWindowFeature {
      neovim_handler: NeovimHandler,
      simple_fullscreen: bool,
      has_transparent_titlebar: bool,
@@ -340,7 +352,9 @@ index cba9ade..208d049 100644
 +            }
 +            WebviewCommand::SetWindow { id, winid } => self.webviews.set_window(id, winid),
 +            WebviewCommand::Post { id, message } => self.webviews.post(id, &message),
-+            WebviewCommand::Focus { id, focus } => self.webviews.focus(&self.ns_window, id, focus),
++            WebviewCommand::Focus { id, focus, keys } => {
++                self.webviews.focus(&self.ns_window, id, focus, &keys)
++            }
 +            WebviewCommand::Close { id } => self.webviews.close(&self.ns_window, id),
 +        }
 +    }
@@ -357,7 +371,7 @@ index cba9ade..208d049 100644
      pub fn from_winit_window(
          window: &Window,
          settings: Arc<Settings>,
-@@ -439,6 +466,7 @@ impl MacosWindowFeature {
+@@ -439,6 +468,7 @@ impl MacosWindowFeature {
              neovim_handler,
              simple_fullscreen,
              has_transparent_titlebar,
@@ -367,10 +381,10 @@ index cba9ade..208d049 100644
          let mut macos_window_feature = macos_window_feature;
 diff --git a/src/platform/macos/webview.rs b/src/platform/macos/webview.rs
 new file mode 100644
-index 0000000..933207c
+index 0000000..0f9eb18
 --- /dev/null
 +++ b/src/platform/macos/webview.rs
-@@ -0,0 +1,450 @@
+@@ -0,0 +1,671 @@
 +//! Native WKWebViews overlaid on Nvim windows.
 +//!
 +//! Nvim (through `neovide.webview.*`) asks for a webview bound to a window handle (`winid`).
@@ -378,8 +392,12 @@ index 0000000..933207c
 +//! displayed, and masked where floating windows cover it, so the Nvim UI stays on top.
 +//! Page script talks back through `window.webkit.messageHandlers.neovide.postMessage(string)`,
 +//! which is forwarded to `neovide.private.webview_message(id, string)` in Nvim.
++//!
++//! Keyboard: while a webview is first responder, only the keys Nvim declared for it (plus
++//! Cmd+C / Cmd+A for selections) reach the page. Every other key event is handed to the editor
++//! view synchronously, so it enters Nvim's input in order with the keys typed after it.
 +
-+use std::collections::HashMap;
++use std::{cell::RefCell, collections::HashMap};
 +
 +use glamour::Intersection;
 +
@@ -388,7 +406,7 @@ index 0000000..933207c
 +    rc::{Retained, Weak},
 +    runtime::ProtocolObject,
 +};
-+use objc2_app_kit::{NSView, NSWindow};
++use objc2_app_kit::{NSEvent, NSEventModifierFlags, NSResponder, NSView, NSWindow};
 +use objc2_core_graphics::CGMutablePath;
 +use objc2_foundation::{
 +    MainThreadMarker, NSNumber, NSObject, NSObjectProtocol, NSPoint, NSRect, NSSize, NSString,
@@ -400,7 +418,7 @@ index 0000000..933207c
 +    WKWebViewConfiguration,
 +};
 +
-+use crate::bridge::{NeovimHandler, ParallelCommand, send_ui};
++use crate::bridge::{NeovimHandler, ParallelCommand, SerialCommand, send_ui};
 +use crate::units::PixelRect;
 +
 +const MESSAGE_HANDLER_NAME: &str = "neovide";
@@ -435,12 +453,17 @@ index 0000000..933207c
 +            };
 +            let body = body.to_string();
 +            let ivars = self.ivars();
-+            // Handing keyboard focus back must not wait for an Nvim round trip: the next key
-+            // press would still land in the webview.
-+            if message_type(&body).as_deref() == Some("blur")
-+                && let Some(ns_window) = ivars.ns_window.load()
-+            {
-+                focus_nvim(&ns_window);
++            // `{"type":"blur","key":"<keys>"}` hands the keyboard back to Nvim and replays the key
++            // the page did not handle. Both happen here rather than in Nvim: focus must move
++            // before the next key press arrives, and the replayed key must enter the same ordered
++            // input queue as the keys typed after it.
++            if let Some(key) = parse_blur(&body) {
++                if let Some(ns_window) = ivars.ns_window.load() {
++                    focus_nvim(&ns_window);
++                }
++                if let Some(key) = key {
++                    send_ui(SerialCommand::Keyboard(key), &ivars.neovim_handler);
++                }
 +            }
 +            send_ui(
 +                ParallelCommand::WebviewMessage { id: ivars.id, message: body },
@@ -466,14 +489,198 @@ index 0000000..933207c
 +    }
 +}
 +
-+fn message_type(body: &str) -> Option<String> {
++/// `Some(key)` for a blur message (`key` is the Nvim key notation to replay, if any).
++fn parse_blur(body: &str) -> Option<Option<String>> {
 +    let value: serde_json::Value = serde_json::from_str(body).ok()?;
-+    Some(value.get("type")?.as_str()?.to_owned())
++    if value.get("type")?.as_str()? != "blur" {
++        return None;
++    }
++    Some(value.get("key").and_then(|key| key.as_str()).map(str::to_owned))
 +}
 +
 +fn focus_nvim(ns_window: &NSWindow) {
 +    if let Some(content_view) = ns_window.contentView() {
 +        ns_window.makeFirstResponder(Some(&content_view));
++    }
++}
++
++/// A key the page receives: a macOS virtual key code plus exact modifiers. Letters are matched by
++/// physical key (ANSI positions), so they work in any keyboard layout.
++#[derive(Debug, Clone, Copy, PartialEq, Eq)]
++struct KeySpec {
++    code: u16,
++    modifiers: NSEventModifierFlags,
++}
++
++const RELEVANT_MODIFIERS: NSEventModifierFlags = NSEventModifierFlags::Shift
++    .union(NSEventModifierFlags::Control)
++    .union(NSEventModifierFlags::Option)
++    .union(NSEventModifierFlags::Command);
++
++const LETTER_KEY_CODES: [u16; 26] =
++    [0, 11, 8, 2, 14, 3, 5, 4, 34, 38, 40, 37, 46, 45, 31, 35, 12, 15, 1, 17, 32, 9, 13, 7, 16, 6];
++
++impl KeySpec {
++    /// Parses Nvim key notation: `j`, `G`, `<Esc>`, `<PageDown>`, `<D-c>`, `<S-Down>`...
++    fn parse(spec: &str) -> Option<Self> {
++        let (mods, key) = match spec.strip_prefix('<').and_then(|s| s.strip_suffix('>')) {
++            Some(inner) => {
++                let mut parts: Vec<&str> = inner.split('-').collect();
++                let key = parts.pop()?;
++                let mut mods = NSEventModifierFlags::empty();
++                for part in parts {
++                    mods |= match part {
++                        "S" => NSEventModifierFlags::Shift,
++                        "C" => NSEventModifierFlags::Control,
++                        "M" | "A" => NSEventModifierFlags::Option,
++                        "D" => NSEventModifierFlags::Command,
++                        _ => return None,
++                    };
++                }
++                (mods, key)
++            }
++            None => (NSEventModifierFlags::empty(), spec),
++        };
++        let mut chars = key.chars();
++        let (code, shift) = match (chars.next(), chars.next()) {
++            (Some(c), None) if c.is_ascii_alphabetic() => (
++                LETTER_KEY_CODES[(c.to_ascii_lowercase() as u8 - b'a') as usize],
++                c.is_ascii_uppercase(),
++            ),
++            _ => (
++                match key {
++                    "Esc" => 53,
++                    "CR" => 36,
++                    "Tab" => 48,
++                    "BS" => 51,
++                    "Space" => 49,
++                    "Up" => 126,
++                    "Down" => 125,
++                    "Left" => 123,
++                    "Right" => 124,
++                    "PageUp" => 116,
++                    "PageDown" => 121,
++                    "Home" => 115,
++                    "End" => 119,
++                    _ => return None,
++                },
++                false,
++            ),
++        };
++        let modifiers = if shift { mods | NSEventModifierFlags::Shift } else { mods };
++        Some(Self { code, modifiers })
++    }
++
++    fn matches(&self, event: &NSEvent) -> bool {
++        event.keyCode() == self.code
++            && (event.modifierFlags() & RELEVANT_MODIFIERS) == self.modifiers
++    }
++}
++
++/// Selection editing works in any focused webview.
++fn selection_keys() -> [KeySpec; 2] {
++    [KeySpec::parse("<D-c>").unwrap(), KeySpec::parse("<D-a>").unwrap()]
++}
++
++#[derive(Debug)]
++struct KeyRoutingIvars {
++    id: u64,
++    neovim_handler: NeovimHandler,
++    page_keys: RefCell<Vec<KeySpec>>,
++}
++
++define_class!(
++    #[derive(Debug)]
++    #[unsafe(super(WKWebView, NSView, NSResponder, NSObject))]
++    #[thread_kind = MainThreadOnly]
++    #[ivars = KeyRoutingIvars]
++    struct KeyRoutingWebView;
++
++    impl KeyRoutingWebView {
++        #[unsafe(method(keyDown:))]
++        fn key_down(&self, event: &NSEvent) {
++            if self.routes_to_page(event) {
++                unsafe { msg_send![super(self), keyDown: event] }
++            } else if let Some(editor) = self.give_focus_to_editor() {
++                unsafe { msg_send![&editor, keyDown: event] }
++            }
++        }
++
++        #[unsafe(method(keyUp:))]
++        fn key_up(&self, event: &NSEvent) {
++            if self.routes_to_page(event) {
++                unsafe { msg_send![super(self), keyUp: event] }
++            } else if let Some(editor) = self.window().and_then(|window| window.contentView()) {
++                unsafe { msg_send![&editor, keyUp: event] }
++            }
++        }
++
++        // Nvim tracks whether the page has the keyboard; tell it whenever that ends, whatever
++        // the cause (a key routed to Nvim, a click on the editor, focus(false)).
++        #[unsafe(method(resignFirstResponder))]
++        fn resign_first_responder(&self) -> bool {
++            let resigned: bool = unsafe { msg_send![super(self), resignFirstResponder] };
++            if resigned {
++                self.set_page_keys(Vec::new());
++                send_ui(
++                    ParallelCommand::WebviewMessage {
++                        id: self.ivars().id,
++                        message: r#"{"type":"blur"}"#.to_owned(),
++                    },
++                    &self.ivars().neovim_handler,
++                );
++            }
++            resigned
++        }
++
++        // Cmd shortcuts go through key equivalents first: keep the ones the page does not own
++        // away from WebKit so they reach Nvim through keyDown: above.
++        #[unsafe(method(performKeyEquivalent:))]
++        fn perform_key_equivalent(&self, event: &NSEvent) -> bool {
++            if self.is_first_responder() && self.routes_to_page(event) {
++                unsafe { msg_send![super(self), performKeyEquivalent: event] }
++            } else {
++                false
++            }
++        }
++    }
++);
++
++impl KeyRoutingWebView {
++    fn new(
++        mtm: MainThreadMarker,
++        configuration: &WKWebViewConfiguration,
++        id: u64,
++        neovim_handler: NeovimHandler,
++    ) -> Retained<Self> {
++        let this = Self::alloc(mtm).set_ivars(KeyRoutingIvars {
++            id,
++            neovim_handler,
++            page_keys: RefCell::new(Vec::new()),
++        });
++        unsafe { msg_send![super(this), initWithFrame: NSRect::ZERO, configuration: configuration] }
++    }
++
++    fn routes_to_page(&self, event: &NSEvent) -> bool {
++        selection_keys().iter().any(|key| key.matches(event))
++            || self.ivars().page_keys.borrow().iter().any(|key| key.matches(event))
++    }
++
++    fn set_page_keys(&self, keys: Vec<KeySpec>) {
++        *self.ivars().page_keys.borrow_mut() = keys;
++    }
++
++    fn is_first_responder(&self) -> bool {
++        self.window()
++            .and_then(|window| window.firstResponder())
++            .is_some_and(|responder| is_descendant_responder(&responder, self))
++    }
++
++    fn give_focus_to_editor(&self) -> Option<Retained<NSView>> {
++        let window = self.window()?;
++        let editor = window.contentView()?;
++        window.makeFirstResponder(Some(&editor));
++        Some(editor)
 +    }
 +}
 +
@@ -486,7 +693,7 @@ index 0000000..933207c
 +
 +#[derive(Debug)]
 +struct Pane {
-+    view: Retained<WKWebView>,
++    view: Retained<KeyRoutingWebView>,
 +    handler: Retained<WebviewMessageHandler>,
 +    winid: u64,
 +    frame: Option<NSRect>,
@@ -614,11 +821,7 @@ index 0000000..933207c
 +                ProtocolObject::from_ref(&*handler),
 +                &NSString::from_str(MESSAGE_HANDLER_NAME),
 +            );
-+            let view = WKWebView::initWithFrame_configuration(
-+                WKWebView::alloc(mtm),
-+                NSRect::ZERO,
-+                &configuration,
-+            );
++            let view = KeyRoutingWebView::new(mtm, &configuration, id, neovim_handler.clone());
 +            // Let the window background (drawn by Neovide) show until the page paints.
 +            let _: () = msg_send![&view, setValue: &*NSNumber::new_bool(false), forKey: ns_string!("drawsBackground")];
 +            view.setInspectable(true);
@@ -650,12 +853,29 @@ index 0000000..933207c
 +        }
 +    }
 +
-+    pub fn focus(&self, ns_window: &NSWindow, id: u64, focus: bool) {
++    /// `keys` (Nvim key notation) are delivered to the page while it has focus; all other keys
++    /// return focus to Nvim.
++    pub fn focus(&self, ns_window: &NSWindow, id: u64, focus: bool, keys: &[String]) {
 +        match self.panes.get(&id) {
 +            Some(pane) if focus => {
-+                ns_window.makeFirstResponder(Some(&pane.view));
++                let specs = keys
++                    .iter()
++                    .filter_map(|key| {
++                        let spec = KeySpec::parse(key);
++                        if spec.is_none() {
++                            log::warn!("webview: unsupported key {key:?}");
++                        }
++                        spec
++                    })
++                    .collect();
++                pane.view.set_page_keys(specs);
++                ns_window.makeFirstResponder(Some(&*pane.view));
 +            }
-+            _ => focus_nvim(ns_window),
++            Some(pane) => {
++                pane.view.set_page_keys(Vec::new());
++                focus_nvim(ns_window);
++            }
++            None => focus_nvim(ns_window),
 +        }
 +    }
 +
@@ -663,9 +883,7 @@ index 0000000..933207c
 +        let Some(pane) = self.panes.remove(&id) else {
 +            return;
 +        };
-+        let had_focus = ns_window
-+            .firstResponder()
-+            .is_some_and(|responder| is_descendant_responder(&responder, &pane.view));
++        let had_focus = pane.view.is_first_responder();
 +        unsafe {
 +            pane.view
 +                .configuration()
@@ -763,7 +981,7 @@ index 0000000..933207c
 +    }
 +}
 +
-+fn is_descendant_responder(responder: &objc2_app_kit::NSResponder, view: &NSView) -> bool {
++fn is_descendant_responder(responder: &NSResponder, view: &NSView) -> bool {
 +    responder.downcast_ref::<NSView>().is_some_and(|responder| responder.isDescendantOf(view))
 +}
 +
@@ -816,9 +1034,26 @@ index 0000000..933207c
 +    }
 +
 +    #[test]
-+    fn message_type_parses_json() {
-+        assert_eq!(message_type(r#"{"type":"blur","key":"j"}"#).as_deref(), Some("blur"));
-+        assert_eq!(message_type("not json"), None);
++    fn key_spec_parses_letters_by_physical_key() {
++        let j = KeySpec::parse("j").unwrap();
++        assert_eq!((j.code, j.modifiers), (38, NSEventModifierFlags::empty()));
++        let g = KeySpec::parse("G").unwrap();
++        assert_eq!((g.code, g.modifiers), (5, NSEventModifierFlags::Shift));
++        let copy = KeySpec::parse("<D-c>").unwrap();
++        assert_eq!((copy.code, copy.modifiers), (8, NSEventModifierFlags::Command));
++        let down = KeySpec::parse("<S-Down>").unwrap();
++        assert_eq!((down.code, down.modifiers), (125, NSEventModifierFlags::Shift));
++        assert_eq!(KeySpec::parse("<Esc>").unwrap().code, 53);
++        assert!(KeySpec::parse("<X-j>").is_none());
++        assert!(KeySpec::parse("<F13>").is_none());
++    }
++
++    #[test]
++    fn parse_blur_extracts_replay_key() {
++        assert_eq!(parse_blur(r#"{"type":"blur","key":"<Space>"}"#), Some(Some("<Space>".into())));
++        assert_eq!(parse_blur(r#"{"type":"blur"}"#), Some(None));
++        assert_eq!(parse_blur(r#"{"type":"click","line":3}"#), None);
++        assert_eq!(parse_blur("not json"), None);
 +    }
 +}
 diff --git a/src/renderer/rendered_window.rs b/src/renderer/rendered_window.rs
@@ -862,7 +1097,7 @@ index 7d2793d..e980532 100644
          };
      }
 diff --git a/src/window/mod.rs b/src/window/mod.rs
-index 33bcfcc..39837d5 100644
+index 33bcfcc..c854c3e 100644
 --- a/src/window/mod.rs
 +++ b/src/window/mod.rs
 @@ -116,6 +116,17 @@ impl From<&str> for ForceClickKind {
@@ -876,7 +1111,7 @@ index 33bcfcc..39837d5 100644
 +    Open { id: u64, winid: u64, url: String },
 +    SetWindow { id: u64, winid: u64 },
 +    Post { id: u64, message: String },
-+    Focus { id: u64, focus: bool },
++    Focus { id: u64, focus: bool, keys: Vec<String> },
 +    Close { id: u64 },
 +}
 +
