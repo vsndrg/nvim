@@ -1,6 +1,6 @@
 // Scrolling motions, computed ahead as trajectories and played by viewport.js
 // on the compositor: hold j/k = velocity (starts on keydown, no key-repeat
-// delay), d/u/f/b/gg/G = eased jumps, wheel/trackpad = smoothed follow.
+// delay), d/u/f/b/gg/G = eased jumps. Wheel and trackpad scroll natively.
 //
 // Trajectories are sampled once per display frame. At full speed a frame moves
 // a whole number of pixels and every motion comes to rest on a whole pixel, so
@@ -12,13 +12,11 @@ const RAMP = 0.05; // s, time constant to reach full speed
 const DECAY = 0.045; // s, time constant to stop after release
 const MIN_STEP = 36; // px a single tap covers before easing out (~70px total)
 const JUMP_TAU = 0.06; // s, time constant of animated jumps
-const WHEEL_TAU = 0.04; // s, smoothing of wheel/trackpad input
 const HORIZON = 120; // s, longest planned stretch of a held key
 
 let holdDir = 0;
 let holdFrom = 0; // offset where the current hold started
 let jumpTarget = null;
-let wheelTarget = null;
 
 // Full speed, rounded so that one frame moves a whole number of pixels. The
 // step only changes when the refresh rate does: 1500 px/s at 120 Hz is 12.5 px,
@@ -106,7 +104,6 @@ function hold(dir, until = null) {
 export function holdStart(dir) {
   if (holdDir === dir) return;
   jumpTarget = null;
-  wheelTarget = null;
   holdDir = dir;
   vp.atFrame(() => {
     holdFrom = vp.y(vp.handoffTime());
@@ -133,46 +130,16 @@ export function jumpBy(dy) {
 
 export function jumpTo(y) {
   holdDir = 0;
-  wheelTarget = null;
   const target = Math.round(vp.clampY(y));
   jumpTarget = target;
   vp.atFrame(() => simulate(settle(vp.y(vp.handoffTime()), vp.velocity(vp.handoffTime()), target, JUMP_TAU)));
 }
 
-// Wheel/trackpad: follow the accumulated target with a short smoothing, so a
-// late frame on the page side never stops the content. Events within a frame
-// add up into one motion.
-let wheelQueued = false;
-let lastWheelPlan = -Infinity;
-const WHEEL_EVERY = 3; // frames between wheel retargets
-
-export function wheel(dy) {
-  holdDir = 0;
-  jumpTarget = null;
-  const base = wheelTarget != null && vp.isMoving() ? wheelTarget : vp.y();
-  wheelTarget = Math.round(vp.clampY(base + dy));
-  if (wheelQueued) return;
-  wheelQueued = true;
-  const run = () => {
-    // Every replaced motion starts up to a few ms off in Core Animation, so
-    // retarget at most every WHEEL_EVERY frames; input in between adds up.
-    if (vp.now() - lastWheelPlan < (WHEEL_EVERY - 0.5) * vp.framePeriod()) {
-      vp.atFrame(run);
-      return;
-    }
-    wheelQueued = false;
-    lastWheelPlan = vp.now();
-    if (wheelTarget != null) simulate(settle(vp.y(vp.handoffTime()), vp.velocity(vp.handoffTime()), wheelTarget, WHEEL_TAU));
-  };
-  vp.atFrame(run);
-}
-
+// Stops the current motion where it is by the time this reaches the screen.
 export function cancel() {
   holdDir = 0;
   jumpTarget = null;
-  wheelTarget = null;
-  wheelQueued = false;
-  if (vp.isMoving()) vp.stop();
+  if (vp.isMoving()) vp.atFrame(() => simulate(() => null));
 }
 
 // One "line" for scroll requests from nvim (count-prefixed j/k): about one tap.

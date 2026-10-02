@@ -2,8 +2,8 @@
 // DYLD_INSERT_LIBRARIES (the ad-hoc signed build has no hardened runtime).
 //
 // At every display-link tick it logs where the page content sits in the UI process: the
-// #content layer (moved by viewport.js) or, without one, WebKit's RenderView (native
-// scrolling). A frame that missed its vsync shows up as a 0 step followed by a double one. SIGHUP toggles
+// #content layer (native scroll plus the transform viewport.js animates) or, without one,
+// WebKit's RenderView. A frame that missed its vsync shows up as a 0 step followed by a double one. SIGHUP toggles
 // recording; stopping writes "<timestamp>\t<y>" rows to $PROBE_OUT. See ../../CLAUDE.md.
 //
 //   clang -dynamiclib -fobjc-arc -framework AppKit -framework QuartzCore probe.m -o probe.dylib

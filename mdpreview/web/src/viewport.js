@@ -1,35 +1,43 @@
-// Virtual scrolling. The document never scrolls natively: #content is moved by
-// a transform, and every motion is a Web Animation that WebKit hands to Core
-// Animation, so frames advance in the render server at every vsync.
+// Scroll position of the preview. The document scrolls natively (trackpad,
+// momentum, scrollbar, find, anchors); keyboard motions are played by Core
+// Animation on top of it.
 //
-// Scrolling the document instead (scrollTo per frame, WebKit's own smooth
-// keyboard scrolling, even trackpad wheel events) goes through a WebContent ->
-// UI process commit per frame, and at 120 Hz ~10-15 % of those commits miss
-// their vsync: a frame shows twice, the next one jumps double. A running CA
-// animation keeps moving whatever the commits do. Mixing the two is not an
-// option: a transform and a scroll offset are applied 0-1 frames apart, so
-// handing an offset from one to the other flashes for a frame.
+// Scrolling the document from the page (scrollTo per frame, and likewise
+// WebKit's own keyboard scrolling) is a WebContent -> UI process commit per
+// frame, and at 120 Hz ~10-15 % of those miss their vsync: a frame shows
+// twice, the next one jumps double. So a keyboard motion leaves the scroll
+// position alone and moves #content by an offset k, animated with a Web
+// Animation that WebKit hands to Core Animation: the render server advances
+// it at every vsync, whatever the commits do.
 //
-// A motion is a trajectory sampled at the display frame rate. New input
-// (releasing a key, the next wheel event) replaces it with one that continues
-// from the current position and velocity. The replacement only shows up a few
-// frames after the frame it is planned in (rAF -> commit -> UI process ->
-// render server; measured ~3 frames at 120 Hz), and until then the old motion
-// keeps playing. So a new trajectory repeats the old one for HANDOFF_FRAMES
-// and only then departs from it: whichever of those frames it shows up in,
-// the two agree. Departing at once made the content jump back by up to 12 px
-// and then forward when the new motion appeared.
+// When the motion is over, k is folded into the scroll position: scrollBy(k)
+// and dropping the transform in one rendering update are applied together
+// (measured: no flash). Not while a native scroll is in flight, though: a
+// scroll from the page makes WebKit hold back the trackpad's deltas until the
+// commit carrying it is applied (measured: the trackpad stalled for ~5 frames,
+// then caught up in one step). Until the scroll ends, the content just stays
+// offset by k.
+//
+// A keyboard motion is a trajectory sampled at the display frame rate. New
+// input (releasing a key) replaces it with one that continues from the current
+// position and velocity. The replacement only shows up a few frames after the
+// frame it is planned in (rAF -> commit -> UI process -> render server;
+// measured ~4 frames at 120 Hz), and until then the old motion keeps playing.
+// So a new trajectory repeats the old one for HANDOFF_FRAMES and only then
+// departs from it: whichever of those frames it shows up in, the two agree.
+// The old animation is also kept underneath for a few frames: removing it
+// takes effect in the commit, the new one only from a later frame (measured:
+// cancelling both in one commit showed a stall and a 33 px jump).
 
 const HANDOFF_FRAMES = 4;
 
 const content = () => document.getElementById('content');
 
-let thumb = null;
-let thumbScale = 0; // thumb px per content px
-let rest = 0; // offset while nothing moves (whole device pixels)
-let motion = null; // { t0, h, xs, anims }
-let outgoing = []; // { anims, until }: replaced motions still playing underneath
+let k = 0; // offset of #content from the scroll position while nothing plays
+let motion = null; // { t0, h, xs, ks, anim }: xs page offsets, ks = xs - scrollY
+let outgoing = []; // { anim, until }: replaced motions still playing underneath
 let loop = 0;
+let scrolling = false; // a native scroll is in flight (until its scrollend)
 const listeners = [];
 
 // ------------------------------------------------------------ frame clock
@@ -94,27 +102,31 @@ export function pageTop(el) {
 
 // ----------------------------------------------------------------- state
 
-// Offset at time `t` (default: this frame), as Core Animation shows it.
-export function y(t = now()) {
-  if (!motion) return rest;
-  const { xs } = motion;
+function kAt(t) {
+  if (!motion) return k;
+  const { ks } = motion;
   const f = (t - motion.t0) / motion.h;
-  if (f <= 0) return xs[0];
-  if (f >= xs.length - 1) return xs[xs.length - 1];
+  if (f <= 0) return ks[0];
+  if (f >= ks.length - 1) return ks[ks.length - 1];
   const i = Math.floor(f);
-  return xs[i] + (xs[i + 1] - xs[i]) * (f - i);
+  return ks[i] + (ks[i + 1] - ks[i]) * (f - i);
+}
+
+// Page offset shown at time `t` (default: this frame).
+export function y(t = now()) {
+  return window.scrollY + kAt(t);
 }
 
 // Velocity at time `t`, px/s.
 export function velocity(t = now()) {
   if (!motion) return 0;
-  const { xs, h } = motion;
+  const { ks, h } = motion;
   const i = Math.floor((t - motion.t0) / h);
-  if (i < 0 || i >= xs.length - 1) return 0;
-  return ((xs[i + 1] - xs[i]) / h) * 1000;
+  if (i < 0 || i >= ks.length - 1) return 0;
+  return ((ks[i + 1] - ks[i]) / h) * 1000;
 }
 
-// The motion being played: offsets one display frame (`h` ms) apart from t0.
+// The motion being played: page offsets one display frame (`h` ms) apart.
 export function plan() {
   return motion ? { xs: motion.xs, h: motion.h, t0: motion.t0 } : null;
 }
@@ -148,24 +160,37 @@ export function isMoving() {
 
 // ------------------------------------------------------------- rendering
 
-function stopAnimations() {
-  if (motion) for (const a of motion.anims) a.cancel();
-  for (const o of outgoing) for (const a of o.anims) a.cancel();
-  outgoing = [];
-}
-
 function dropOutgoing(t) {
   outgoing = outgoing.filter((o) => {
     if (t < o.until) return true;
-    for (const a of o.anims) a.cancel();
+    o.anim.cancel();
     return false;
   });
 }
 
-// Longest keyframe segment, in frames. Core Animation stalls for a frame when
-// a short segment is followed by a much longer one (measured: the frame where
-// a ramp joins one long constant-speed segment shows twice, the next jumps
-// double); segments of up to ~100 ms are played evenly.
+function setK(value) {
+  k = value;
+  content().style.transform = value ? `translateY(${-value}px)` : '';
+}
+
+// Drops the motion's animations; the content rests at offset `k`.
+function finish() {
+  motion?.anim.cancel();
+  for (const o of outgoing) o.anim.cancel();
+  outgoing = [];
+  motion = null;
+}
+
+function fold() {
+  if (!k) return;
+  window.scrollBy(0, k);
+  setK(0);
+}
+
+// Longest keyframe segment, in frames. Core Animation holds each segment's
+// start for ~0.1 % of its length (measured: a 20 s constant-speed segment
+// froze for 3 frames at its start, a 120 s one for 14), so a held key's long
+// stretch is cut into segments short enough for that to stay far below a frame.
 const MAX_SEGMENT = 12;
 
 // Drops samples that linear interpolation between their neighbours already
@@ -184,27 +209,21 @@ function keyframeIndices(xs) {
 function frameLoop(t) {
   observeFrame(t);
   dropOutgoing(t);
-  if (motion && t - motion.t0 >= (motion.xs.length - 1) * motion.h) {
-    rest = motion.xs[motion.xs.length - 1];
-    stopAnimations();
-    motion = null;
+  if (motion && t - motion.t0 >= (motion.ks.length - 1) * motion.h) {
+    k = motion.ks[motion.ks.length - 1];
+    finish();
+    if (!scrolling) fold();
   }
   notify();
   loop = motion || outgoing.length ? requestAnimationFrame(frameLoop) : 0;
 }
 
-function placeThumb(offset) {
-  if (thumb) thumb.style.transform = `translateY(${offset * thumbScale}px)`;
-}
-
 // Jumps to `to` at once, dropping motions not started yet.
 export function setY(to) {
   pending.length = 0;
-  stopAnimations();
-  motion = null;
-  rest = snap(clampY(to));
-  content().style.transform = `translateY(${-rest}px)`;
-  placeThumb(rest);
+  finish();
+  setK(0);
+  window.scrollTo(0, snap(clampY(to)));
   notify();
 }
 
@@ -213,92 +232,35 @@ export function setY(to) {
 // current motion goes on unchanged.
 export function play(xs, h) {
   const t0 = now();
+  const max = maxY();
   const lead = [];
   for (let i = 0; i < HANDOFF_FRAMES; i++) lead.push(y(t0 + i * h));
-  xs = lead.concat(xs);
-  const max = maxY();
-  xs = xs.map((x) => Math.min(Math.max(x, 0), max));
+  xs = lead.concat(xs).map((x) => Math.min(Math.max(x, 0), max));
   xs[xs.length - 1] = snap(xs[xs.length - 1]);
+  const s = window.scrollY;
+  const ks = xs.map((x) => x - s);
   // The current motion keeps playing underneath until the new one surely
   // shows (the new animation is created later, so it wins once it does).
-  if (motion) outgoing.push({ anims: motion.anims, until: t0 + 2 * HANDOFF_FRAMES * h });
-  const end = xs[xs.length - 1];
-  const idx = keyframeIndices(xs);
-  const offset = (i) => i / (xs.length - 1);
-  const timing = { duration: (xs.length - 1) * h, easing: 'linear' };
-  const el = content();
+  if (motion) outgoing.push({ anim: motion.anim, until: t0 + 2 * HANDOFF_FRAMES * h });
+  const idx = keyframeIndices(ks);
   // The underlying style is the end state: when the CA animation finishes
   // (a few frames before JS hears about it) the layer stays put.
-  el.style.transform = `translateY(${-end}px)`;
-  const anims = [el.animate(idx.map((i) => ({
-    transform: `translateY(${-xs[i]}px)`, offset: offset(i),
-  })), timing)];
-  anims[0].startTime = t0;
-  // The thumb gets the same motion a frame later, in a commit of its own:
-  // started in the same commit, it made the content's animation start up to
-  // 8 px off at 1500 px/s (measured; alone, within ~3 px).
-  requestAnimationFrame(() => {
-    if (motion?.anims !== anims || !thumbScale) return;
-    thumb.style.transform = `translateY(${end * thumbScale}px)`;
-    const ta = thumb.animate(idx.map((i) => ({
-      transform: `translateY(${xs[i] * thumbScale}px)`, offset: offset(i),
-    })), timing);
-    ta.startTime = t0;
-    anims.push(ta);
-  });
-  motion = { t0, h, xs, anims };
+  setK(ks[ks.length - 1]);
+  const anim = content().animate(idx.map((i) => ({
+    transform: `translateY(${-ks[i]}px)`, offset: i / (ks.length - 1),
+  })), { duration: (ks.length - 1) * h, easing: 'linear' });
+  anim.startTime = t0;
+  motion = { t0, h, xs, ks, anim };
   if (!loop) loop = requestAnimationFrame(frameLoop);
 }
 
-export function stop() {
-  setY(y());
-}
-
-// ------------------------------------------------------------ scrollbar
-
-// Content or viewport size changed.
-export function relayout() {
-  const vh = viewHeight();
-  const total = contentHeight();
-  const size = total > vh ? Math.max(24, (vh * vh) / total) : 0;
-  thumb.hidden = size === 0;
-  thumb.style.height = `${size}px`;
-  thumbScale = size ? (vh - size) / maxY() : 0;
-  if (motion) return;
-  const clamped = snap(clampY(rest));
-  if (clamped !== rest) setY(clamped);
-  else placeThumb(rest);
-}
-
 export function init() {
-  const el = content();
-  thumb = document.createElement('div');
-  thumb.className = 'vscroll-thumb';
-  const bar = document.createElement('div');
-  bar.className = 'vscroll';
-  bar.appendChild(thumb);
-  document.body.appendChild(bar);
-  el.style.transform = 'translateY(0px)';
-  relayout();
-
-  // Dragging the thumb.
-  thumb.addEventListener('pointerdown', (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    thumb.setPointerCapture(e.pointerId);
-    const startY = e.clientY;
-    const startX = y();
-    const move = (ev) => {
-      if (thumbScale) setY(startX + (ev.clientY - startY) / thumbScale);
-    };
-    const up = () => {
-      thumb.removeEventListener('pointermove', move);
-      thumb.removeEventListener('pointerup', up);
-    };
-    thumb.addEventListener('pointermove', move);
-    thumb.addEventListener('pointerup', up);
+  window.addEventListener('scroll', () => {
+    scrolling = true;
+    notify();
+  }, { passive: true });
+  window.addEventListener('scrollend', () => {
+    scrolling = false;
+    if (!motion) fold();
   });
-
-  new ResizeObserver(() => relayout()).observe(el);
-  window.addEventListener('resize', () => relayout());
 }

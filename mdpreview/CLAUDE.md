@@ -13,9 +13,9 @@ macOS + patched Neovide only. In any other UI `<leader>mp` shows a single notifi
 | `lua/mdpreview/build.lua` | `:MdPreviewBuild` (`npm ci` + `node build.mjs`), auto-build when `web/dist` is missing |
 | `web/src/render.js` | markdown-it + plugins (GFM, alerts, footnotes, emoji, front matter, KaTeX, mermaid, hljs), `data-line` source map |
 | `web/src/main.js` | page runtime: message dispatcher, DOM diff (morphdom), mouse, keys, theming |
-| `web/src/viewport.js` | virtual scrolling: the document never scrolls, `#content` is moved by compositor (Core Animation) animations; own scrollbar |
+| `web/src/viewport.js` | scroll position: the document scrolls natively (trackpad, scrollbar, find, anchors); keyboard motions animate `#content`'s transform on the compositor (Core Animation) and are folded into the scroll position when they end |
 | `web/src/scroll-sync.js` | source line ↔ page offset (port of VSCode's `scroll-sync.ts`), offsets relative to `#content` |
-| `web/src/scroller.js` | motions planned as per-frame trajectories: hold j/k = velocity, d/u/f/b/gg/G = eased jumps, wheel/trackpad = smoothed follow |
+| `web/src/scroller.js` | keyboard motions planned as per-frame trajectories: hold j/k = velocity, d/u/f/b/gg/G = eased jumps; wheel/trackpad input stops them |
 | `web/src/mermaid.js`, `find.js` | lazy mermaid with SVG cache; in-page search |
 | `web/themes/*.css` | `themes.css` maps every theme onto github-markdown-css variables; `preview.css` page chrome |
 | `web/build.mjs` | esbuild IIFE bundles → `web/dist/` (gitignored), plus `dist/dev.html` fed with `test/kitchen-sink.md` |
@@ -91,16 +91,20 @@ Lines are 0-based markdown-it `map[0]` values.
   3. Wait at least 3 s: the SIGHUP handler is installed late, and SIGHUP before that kills Neovide.
   4. Send `kill -HUP` to Neovide, run `:MdPreview bench`, and send `kill -HUP` again 2 s later.
   5. Run `analyze.py probe.tsv`.
-- The probe reads the `#content` layer (or, with native scrolling, the RenderView) at each display-link tick in the UI process. A CA animation measures a perfectly even step with it, so it is trustworthy. A sample can be off when its display-link callback runs late (two neighbouring steps summing to two frames): that is the probe, not the screen.
+- The probe reads where the `#content` layer sits (native scroll plus `viewport.js`'s transform) at each display-link tick in the UI process. A CA animation measures a perfectly even step with it, so it is trustworthy. A sample can be off when its display-link callback runs late (two neighbouring steps summing to two frames): that is the probe, not the screen.
 - To measure a retarget seam, align the clocks: post `performance.now()` pings from the page and stamp them with `CACurrentMediaTime()` on arrival (min over pings). `performance.timeOrigin` can't be used: mach time stops during sleep.
 - Reference numbers (2026-10, M-series ProMotion, preview mode, 64 full-speed vsyncs):
   - native scroll, old timestamp-integrating scroller: 40–45 uneven;
   - native scroll, frame-clock scroller: 14–19 uneven, all of them WebKit commit stalls/doubles;
-  - compositor-driven (`viewport.js`): 0 stalls, 0 doubles, 0–4 uneven by >1 px;
-  - releasing a held key: one step 0.4–8 px off (Core Animation start jitter), then smooth;
-  - wheel at 12.5 px/vsync: step s.d. 0.3–0.7 px.
+  - compositor-driven keyboard motion (`viewport.js`): 0 stalls, 0 doubles, 0–6 uneven by >1 px (most of them probe pairs summing to two steps);
+  - releasing a held key: decelerates without a seam in most runs, sometimes one step a few px off (Core Animation start offset);
+  - fold at the end of a motion: no visible step;
+  - native wheel scrolling (synthetic, 12 px/event per vsync): a stall+double pair every ~50 frames, as WebKit gives it.
 - End-to-end:
-  1. Run a dev instance with an isolated init so tests can't touch the user's state (themery, sessions, clipboard): `~/src/neovide/target/release/neovide --no-fork --log FILE -- -u <mininit.lua> --listen <sock>`. A minimal init sets `mapleader = " "`, prepends this dir to `rtp` and calls `require("mdpreview").setup()`.
+  1. Run a dev instance with an isolated init so tests can't touch the user's state (themery, sessions, clipboard): `~/src/neovide/target/release/neovide --no-fork -- -u <mininit.lua> --listen <sock>`. A minimal init sets `mapleader = " "`, prepends this dir to `rtp` and calls `require("mdpreview").setup()`.
+     - `--log` takes no value: it writes `neovide_r*.log` to the cwd, and a following word becomes a file argument.
+     - Open the markdown file with `:edit` over the socket.
+     - Keep the socket path under 104 bytes: a longer one is silently truncated.
   2. Drive it with `nvim --server <sock> --remote-expr`.
   3. Screenshot **only that window**: get its CGWindowID from `CGWindowListCopyWindowInfo` by PID (the largest layer-0 window), then `screencapture -x -o -l <id>`. Never capture the whole screen.
   4. Send real keys with `CGEvent.postToPid(pid)`. Never post global mouse or keyboard events: the test window is usually behind the user's apps.
@@ -115,13 +119,15 @@ Lines are 0-based markdown-it `map[0]` values.
 - A dev Neovide started while another instance of the same channel runs can come up with no window, and webview commands are then dropped. This is intermittent, so just retry.
 - Scroll judder at 120 Hz:
   - WebKit's rAF timestamps have 1 ms resolution and ±2 ms jitter around the vsync a frame is shown at; integrating velocity over them gave 10–16 px steps for 12.5 px/frame. Motions are planned in whole frames of an estimated refresh period, at an integral full-speed step with hysteresis (1500 px/s × 8.33 ms sits exactly on a rounding boundary).
-  - Any scroll driven from WebContent misses ~10–15 % of vsyncs as stall+double pairs: JS `scrollTo` (even a trivial loop), WebKit's own smooth keyboard scrolling, synthetic wheel events. CPU is not the cause (main threads 94–95 % idle), nor is Neovide. Hence `viewport.js`: no native scrolling at all, every motion a Web Animation on `#content`'s transform, played by Core Animation.
-- Core Animation / WebKit facts behind `viewport.js` (all measured with the probe):
-  - Handing an offset between a transform and the native scroll position races (applied 0–1 frames apart, nondeterministically): one frame flashes the whole distance. So there is no native scroll.
-  - A new animation shows up ~3 frames after the frame it is planned in, and its first shown frame can be stale. A replacement therefore repeats the old trajectory for `HANDOFF_FRAMES`, and the old animation keeps playing underneath until the new one surely shows. Replacing at once gave a −12/+31 px seam.
-  - Each new animation starts with ±~5 ms jitter. That is invisible once, but visible when retargeting every frame, so wheel input retargets at most every 3 frames.
-  - Starting the thumb animation in the same commit as the content's made the content's start worse (up to 8 px); per-frame thumb style writes too. The thumb animation is started one frame later.
-  - A keyframe segment much longer than the one before it stalls for a frame at the join; segments are capped at 12 frames.
+  - Any scroll driven from WebContent misses ~10–15 % of vsyncs as stall+double pairs: JS `scrollTo` (even a trivial loop), WebKit's own smooth keyboard scrolling. Native wheel scrolling has them too, less often. CPU is not the cause (main threads 94–95 % idle), nor is Neovide. Hence keyboard motions are Web Animations on `#content`'s transform, played by Core Animation; the trackpad stays native (its input is uneven anyway, and native feels right).
+- Core Animation / WebKit facts behind `viewport.js` (measured with the probe, in an isolated WKWebView host and in Neovide):
+  - `scrollBy(k)` plus dropping a static `translateY(-k)` in the same rendering update are applied together: no flash. This needs `#content` in the normal flow. An earlier note here said they race, and a fixed wrapper moved by a scroll-driven animation was built around that. Both were wrong.
+  - A scroll from the page while a trackpad gesture is in flight makes WebKit hold the gesture's deltas until the commit carrying that scroll is applied (~5 frames on the preview page, then one catch-up step). So the fold waits for `scrollend`. `scrollend` fires after gestures and after programmatic scrolls.
+  - A new animation shows up ~4 frames after the frame it is planned in. Its time base is right, so a motion started at once loses its first frames: a jump. Motions therefore start `HANDOFF_FRAMES` later, repeating the old trajectory until then.
+  - Cancelling the old animation and adding its replacement in one commit gives a stall and then a ~33 px jump. The old animation keeps playing underneath for `2 × HANDOFF_FRAMES`.
+  - Core Animation holds the start of each keyframe segment for ~0.1 % of the segment's length: a 20 s segment froze for 3 frames, a 120 s one for 14. Segments are capped at 12 frames.
   - A finished CA animation reverts before JS `onfinish` runs, and `fill: 'forwards'` is not kept on the CA side. The inline style is always set to the end state.
   - `composite: 'add'` animations are not accelerated: they run on the main thread and stall like `scrollTo`.
   - Two nested layers with a correction animation don't work either: each animation has its own start offset, so the sum drifts and jumps when the layers are folded.
+  - `ThreadedTimeBasedAnimationsEnabled` (WebKit feature flag, Preview, off by default) makes replacements seamless and starts immediate, but steady steps then jitter by ±1.5 px (±0.2 px with Core Animation), with an occasional stall. Not used.
+- Synthetic wheel events in a test host need gesture phases (began/changed/ended) and a location in window coordinates (the `NSEvent` has no window). Without phases, WebKit takes the gesture as unfinished, and later animations start several frames late. With a wrong location, the root still scrolls but no DOM `wheel` event is dispatched.

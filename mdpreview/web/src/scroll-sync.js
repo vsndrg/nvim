@@ -1,8 +1,8 @@
 // Source line <-> scroll offset mapping. Port of VSCode's
 // extensions/markdown-language-features/preview-src/scroll-sync.ts (MIT).
 //
-// Offsets are page offsets: px from the top of #content, which viewport.js
-// moves with a transform instead of scrolling the document.
+// Offsets are page offsets: px from the top of #content, whatever the scroll
+// position and the transform viewport.js animates it with.
 
 let cachedElements = null;
 

@@ -175,15 +175,8 @@ window.addEventListener('resize', () => {
 const page = () => window.innerHeight;
 const fullPage = () => page() - 2 * LINE_STEP;
 
-// Wheel/trackpad scrolling goes through the same compositor-driven motion.
-// Horizontal scrolling (wide code blocks, tables) stays native.
-window.addEventListener('wheel', (e) => {
-  if (Math.abs(e.deltaY) < Math.abs(e.deltaX)) return;
-  e.preventDefault();
-  state.followLine = null;
-  const unit = e.deltaMode === 1 ? 40 : e.deltaMode === 2 ? page() : 1;
-  scroller.wheel(e.deltaY * unit);
-}, { passive: false });
+// Wheel/trackpad scrolling (native) takes over from keyboard motions.
+window.addEventListener('wheel', () => scroller.cancel(), { passive: true });
 
 // Scroll requests from nvim (its mappings run when the webview lacks focus).
 function scrollAction(action, n = 1) {
