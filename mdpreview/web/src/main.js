@@ -123,18 +123,37 @@ function markActiveLine() {
   el?.classList.add('code-active-line');
 }
 
+// While scrolling, nvim only needs whole-line changes (it scrolls the source
+// window by lines); the exact fractional line follows once scrolling settles.
+// A message per frame would cost an IPC round through Neovide every frame.
 let scrollQueued = false;
+let scrollEcho = false;
+let lastPosted = null;
+let settleTimer = 0;
+
+function postScrolled(exact) {
+  const echo = scrollEcho;
+  // A user scroll (wheel/keys) detaches the preview from the editor
+  // position until nvim scrolls again.
+  if (!echo) state.followLine = null;
+  const line = sourceLineForOffset(window.scrollY);
+  if (line == null) return;
+  const key = `${Math.floor(line)}:${echo}`;
+  if (!exact && key === lastPosted) return;
+  lastPosted = key;
+  post({ type: 'scrolled', line, echo });
+}
+
 window.addEventListener('scroll', () => {
+  // Decided when the scroll happens: the settle post runs after the window.
+  scrollEcho = performance.now() < state.suppressScrollUntil;
+  clearTimeout(settleTimer);
+  settleTimer = setTimeout(() => postScrolled(true), 100);
   if (scrollQueued) return;
   scrollQueued = true;
   requestAnimationFrame(() => {
     scrollQueued = false;
-    const echo = performance.now() < state.suppressScrollUntil;
-    // A user scroll (wheel/keys) detaches the preview from the editor
-    // position until nvim scrolls again.
-    if (!echo) state.followLine = null;
-    const line = sourceLineForOffset(window.scrollY);
-    if (line != null) post({ type: 'scrolled', line, echo });
+    postScrolled(false);
   });
 }, { passive: true });
 
@@ -424,22 +443,31 @@ document.addEventListener('keyup', (e) => {
 window.addEventListener('blur', () => scroller.holdEnd());
 
 // Diagnostics: frame pacing of a 1 s held-key scroll (`:MdPreview bench`).
+// `uneven` counts full-speed frames whose scroll step differs from the median
+// step: on screen those read as judder even at a perfect frame rate.
 function bench() {
   const gaps = [];
-  let last = performance.now();
-  const start = last;
-  scroller.jumpTo(0);
+  const steps = [];
+  scroller.cancel();
+  window.scrollTo(0, 0);
   setTimeout(() => {
+    const start = performance.now();
+    let last = start;
+    let lastY = window.scrollY;
     scroller.holdStart(1);
     const tick = (t) => {
       gaps.push(t - last);
       last = t;
+      // Steps once full speed is reached (the ramp takes ~0.3 s).
+      if (t - start > 400) steps.push(window.scrollY - lastY);
+      lastY = window.scrollY;
       if (t - start < 1300) {
         requestAnimationFrame(tick);
       } else {
         scroller.holdEnd(1);
         const g = gaps.slice(2).sort((a, b) => a - b);
         const mean = g.reduce((a, b) => a + b, 0) / g.length;
+        const stepMedian = [...steps].sort((a, b) => a - b)[steps.length >> 1];
         post({
           type: 'benchResult',
           fps: Math.round(1000 / mean),
@@ -447,10 +475,12 @@ function bench() {
           p95: +g[Math.floor(g.length * 0.95)].toFixed(2),
           max: +g[g.length - 1].toFixed(2),
           frames: g.length,
+          step: stepMedian,
+          uneven: steps.filter((d) => Math.abs(d - stepMedian) > 0.5).length,
+          steady: steps.length,
         });
       }
     };
-    last = performance.now();
     requestAnimationFrame(tick);
   }, 300);
 }

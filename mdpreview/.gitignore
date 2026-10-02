@@ -1,3 +1,4 @@
 web/node_modules/
 web/dist/
 web/.build/
+test/vsync-probe/*.dylib
