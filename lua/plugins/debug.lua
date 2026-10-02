@@ -96,6 +96,8 @@ return {
       }
 
       -- dap.configurations.cpp / .c — see lua/lang/cpp.lua (setup_dap).
+      -- dap.configurations.go — see lua/lang/go.lua (setup_dap): nvim-dap-go
+      -- drives delve, re-configured per project so tag-gated tests are built.
 
       local uv = vim.loop
 
@@ -182,6 +184,55 @@ return {
       vim.keymap.set('n', '<A-h>', dap.step_out, {})
       vim.keymap.set('n', '<A-k>', dap.run_last, {})
 
+      -- Stack frame navigation. codelldb does not advertise `supportsStepBack`,
+      -- so `dap.step_back` is unavailable; walking up the frames is the closest
+      -- way to inspect where the current call came from.
+      vim.keymap.set('n', '<A-K>', dap.up, { desc = "Frame up" })
+      vim.keymap.set('n', '<A-J>', dap.down, { desc = "Frame down" })
+
+      -- One prompt chain: condition, hit count, log message. An empty answer
+      -- leaves that field unset, so answering nothing three times yields a
+      -- plain breakpoint. A non-empty log message makes it a logpoint: the
+      -- session prints the message and keeps running instead of stopping.
+      vim.keymap.set('n', '<Leader>dB', function()
+        local function ask(prompt)
+          local value = vim.fn.input({ prompt = prompt })
+          return value ~= "" and value or nil
+        end
+
+        local condition = ask("Condition: ")
+        local hit_condition = ask("Hit count: ")
+        local log_message = ask("Log message: ")
+
+        dap.set_breakpoint(condition, hit_condition, log_message)
+      end, { desc = "Conditional breakpoint" })
+
+      -- Evaluate the expression under the cursor, or the visual selection.
+      vim.keymap.set({ 'n', 'v' }, '<Leader>de', function()
+        dapui.eval(nil, { enter = true })
+      end, { desc = "Evaluate expression" })
+
+      vim.keymap.set('n', '<Leader>dt', function()
+        dap.repl.toggle()
+      end, { desc = "Toggle REPL" })
+
+      vim.keymap.set('n', '<Leader>dR', dap.restart, { desc = "Restart session" })
+
+      -- codelldb exposes Rust panics under the `rust_panic` filter. With it on,
+      -- the session stops at the panic site instead of after the unwind, so the
+      -- frame that caused it is still on the stack.
+      local panic_breakpoint = false
+      vim.keymap.set('n', '<Leader>dx', function()
+        if not dap.session() then
+          vim.notify("No active debug session", vim.log.levels.WARN)
+          return
+        end
+
+        panic_breakpoint = not panic_breakpoint
+        dap.set_exception_breakpoints(panic_breakpoint and { "rust_panic" } or {})
+        vim.notify("Panic breakpoint: " .. (panic_breakpoint and "on" or "off"))
+      end, { desc = "Toggle panic breakpoint" })
+
       vim.api.nvim_create_autocmd("BufEnter", {
         pattern = "[dap-terminal] Launch (codelldb)",
         callback = function()
@@ -193,6 +244,17 @@ return {
       vim.keymap.set('n', '<Leader>dw', function()
         require('dapui').elements.watches.add(vim.fn.expand('<cword>'))
       end)
+
+      -- Hex value display. codelldb ignores the DAP `format.hex` option, so
+      -- this goes through its own `_adapterSettings` request (session-wide) and
+      -- through `,x` expression suffixes (per object). See utils/dap_hex.lua.
+      local dap_hex = require("utils.dap_hex")
+      dap_hex.setup()
+
+      vim.keymap.set('n', '<Leader>dh', dap_hex.toggle_global, { desc = "Toggle hex for all values" })
+      vim.keymap.set({ 'n', 'v' }, '<Leader>dH', dap_hex.toggle_under_cursor,
+        { desc = "Toggle hex for the object under the cursor" })
+      vim.keymap.set('n', '<Leader>dF', dap_hex.pick_format, { desc = "Pick value format" })
 
       vim.keymap.set('n', '<Leader>dq', function()
         require("dapui").close()
