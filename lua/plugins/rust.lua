@@ -25,6 +25,29 @@ return {
             or path_exists(vim.fs.joinpath(root_dir, "rust-project.json"))
         end
 
+        -- Per-project rust-analyzer overrides: drop a `.rust-analyzer.json`
+        -- into the crate root, e.g. `{"rust-analyzer":{"cargo":{"allFeatures":false}}}`
+        -- for crates whose features are mutually exclusive.
+        local function project_settings(project_root, default_settings)
+          local settings = vim.deepcopy(default_settings or {})
+          local override = vim.fs.joinpath(project_root, ".rust-analyzer.json")
+
+          if not path_exists(override) then
+            return settings
+          end
+
+          local ok, decoded = pcall(function()
+            return vim.json.decode(table.concat(vim.fn.readfile(override), "\n"))
+          end)
+
+          if not ok or type(decoded) ~= "table" then
+            vim.notify("Invalid " .. override, vim.log.levels.WARN)
+            return settings
+          end
+
+          return vim.tbl_deep_extend("force", settings, decoded)
+        end
+
         local function standalone_settings(default_settings)
           local settings = vim.deepcopy(default_settings or {})
           settings["rust-analyzer"] = settings["rust-analyzer"] or {}
@@ -112,7 +135,7 @@ return {
             end,
             settings = function(project_root, default_settings)
               if has_project_root(project_root) then
-                return vim.deepcopy(default_settings or {})
+                return project_settings(project_root, default_settings)
               end
 
               return standalone_settings(default_settings)
@@ -123,6 +146,12 @@ return {
                   allFeatures = true,
                   loadOutDirsFromCheck = true,
                   runBuildScripts = true,
+                  -- Give rust-analyzer its own target/rust-analyzer dir. Sharing
+                  -- ./target with `cargo run` in the terminal split makes both
+                  -- contend for cargo's build lock, which freezes diagnostics
+                  -- until one side gives up. Covers flycheck *and* the
+                  -- build-script/proc-macro build; costs duplicated artifacts.
+                  targetDir = true,
                 },
                 check = {
                   command = "clippy",
