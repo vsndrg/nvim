@@ -186,5 +186,105 @@ class HookTest(unittest.TestCase):
         self.assertEqual((r.returncode, r.stdout), (0, ""))
 
 
+    # --- shell guard -------------------------------------------------------------------------
+
+    def cmd(self, command):
+        r = self.hook("guard.py", {"tool_name": "Bash", "cwd": str(self.root),
+                                   "tool_input": {"command": command}})
+        self.assertEqual(r.returncode, 0, r.stderr)
+        return "deny" if '"deny"' in r.stdout else "pass"
+
+    def test_live_trees_read_only(self):
+        for c in ("cp x ~/.config/nvim/a", "echo x > ~/.config/nvim/a", "cd ~/.config/nvim && git commit -qam x",
+                  "git -C ~/.config/nvim reset --hard agent/preview", "sed -i '' s/a/b/ ~/.config/nvim/init.lua",
+                  "find ~/.config/nvim -name x -delete", "cargo build --manifest-path ~/src/neovide/Cargo.toml",
+                  "cp target/release/neovide ~/.local/share/neovide-patched/x",
+                  "git -C ~/.config/nvim merge --ff-only agent/preview && echo done",
+                  "cat ~/.config/nvim/init.lua | tee /tmp/x"):
+            self.assertEqual(self.cmd(c), "deny", c)
+        for c in ("cat ~/.config/nvim/mdpreview/CLAUDE.md", "git -C ~/.config/nvim log --oneline -3",
+                  "ls ~/.config/nvim 2>/dev/null", "grep -rn x ~/src/neovide/src 2>&1 | head",
+                  "cd ~/src/neovide-agent && cargo build --release -q", "echo x > ~/.config/nvim-other/a",
+                  "npm run build", "git commit -qam 'feat: x'"):
+            self.assertEqual(self.cmd(c), "pass", c)
+
+    def test_push_and_tag_moves_refused(self):
+        for c in ("git push", "git -c x=y push origin main", "git tag -a -f gate/P1", "git tag -d gate/P1",
+                  "git -C . tag --delete gate/P1", "git update-ref refs/tags/gate/P1 HEAD"):
+            self.assertEqual(self.cmd(c), "deny", c)
+        for c in ("git tag gate/P1", "git tag -a -m 'gate P1' gate/P1", "git tag -l 'gate/*'"):
+            self.assertEqual(self.cmd(c), "pass", c)
+
+    def test_gate_merge_refused_while_branch_changes_protected(self):
+        merge = "git -C ~/.config/nvim merge --ff-only agent/preview"
+        self.assertEqual(self.cmd(merge), "pass")
+        spec = self.root / "preview/agent/SPEC.md"
+        spec.write_text("weaker\n")
+        sh(self.root, "git", "commit", "-qam", "launder")
+        self.assertEqual(self.cmd(merge), "deny")
+        spec.write_text("spec\n")
+        sh(self.root, "git", "commit", "-qam", "revert")
+        self.assertEqual(self.cmd(merge), "pass")
+        sh(self.root, "git", "tag", "gate/P1")
+        (self.root / "preview/test/golden/md/a.txt").write_text("loosened\n")
+        sh(self.root, "git", "commit", "-qam", "cheat")
+        self.assertEqual(self.cmd(merge), "deny")
+
+    # --- tag pins ----------------------------------------------------------------------------
+
+    def rev(self, ref):
+        return subprocess.run(["git", "-C", str(self.root), "rev-parse", "-q", "--verify", ref],
+                              capture_output=True, text=True).stdout.strip()
+
+    def test_gate_tags_pinned(self):
+        sh(self.root, "git", "tag", "-a", "-m", "gate", "gate/P1")
+        pinned = self.rev("refs/tags/gate/P1")
+        self.assertEqual(self.bash().returncode, 0)
+        (self.root / "src.txt").write_text("more\n")
+        sh(self.root, "git", "commit", "-qam", "more")
+        sh(self.root, "git", "tag", "-f", "gate/P1")
+        r = self.bash()
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("gate/P1", r.stderr)
+        self.assertEqual(self.rev("refs/tags/gate/P1"), pinned)
+        sh(self.root, "git", "tag", "-d", "gate/P1")
+        self.assertEqual(self.bash().returncode, 2)
+        self.assertEqual(self.rev("refs/tags/gate/P1"), pinned)
+        self.assertEqual(self.bash().returncode, 0)
+
+    def test_two_tags_on_one_commit(self):
+        sh(self.root, "git", "tag", "gate/P0")
+        sh(self.root, "git", "tag", "gate/P1")
+        self.assertEqual(self.bash().returncode, 0)
+        sh(self.root, "git", "tag", "-d", "gate/P0")
+        self.assertEqual(self.bash().returncode, 2)
+        self.assertTrue(self.rev("refs/tags/gate/P0"))
+
+    def test_adapter_protected_after_p3b(self):
+        adapter = self.root / "preview/test/adapter.lua"
+        sh(self.root, "git", "tag", "gate/P3a")
+        self.assertEqual(self.edit(adapter), "pass")
+        sh(self.root, "git", "tag", "gate/P3b")
+        self.assertEqual(self.edit(adapter), "deny")
+
+    # --- attempt counter ---------------------------------------------------------------------
+
+    def test_run_count_kept_per_task(self):
+        plan = self.root / "preview/work/PLAN.md"
+        text = plan.read_text()
+        for _ in range(3):
+            self.assertEqual(self.launch(), "pass")
+        plan.write_text(text.replace("- [ ] first task", "- [x] first task"))
+        for _ in range(5):
+            self.assertEqual(self.launch(), "pass")
+        plan.write_text(text.replace("- [ ] first task", "- [ ]   first   task"))  # whitespace only
+        for _ in range(2):
+            self.assertEqual(self.launch(), "pass")
+        self.assertEqual(self.launch(), "deny")
+
+    def test_failures_logged_in_test_out(self):
+        self.hook("guard.py", "not json")
+        self.assertIn("JSONDecodeError", (self.root / "preview/test/out/hooks.log").read_text())
+
 if __name__ == "__main__":
     unittest.main()
