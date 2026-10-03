@@ -13,7 +13,7 @@ macOS + patched Neovide only. In any other UI `<leader>mp` shows a single notifi
 | `lua/mdpreview/build.lua` | `:MdPreviewBuild` (`npm ci` + `node build.mjs`), auto-build when `web/dist` is missing |
 | `web/src/render.js` | markdown-it + plugins (GFM, alerts, footnotes, emoji, front matter, KaTeX, mermaid, hljs), `data-line` source map |
 | `web/src/main.js` | page runtime: message dispatcher, DOM diff (morphdom), mouse, keys, theming |
-| `web/src/viewport.js` | scroll position: the document scrolls natively (trackpad, scrollbar, find, anchors); keyboard motions animate `#content`'s transform on the compositor (Core Animation) and are folded into the scroll position when they end |
+| `web/src/viewport.js` | scroll position: the document scrolls natively (trackpad, scrollbar, find, anchors); keyboard motions animate `#content`'s transform on the compositor (Core Animation); the scroll position follows them in whole pixels every frame with `<body>` moved back by the same distance (so the native scrollbar moves), and the rest is folded in when they end |
 | `web/src/scroll-sync.js` | source line ↔ page offset (port of VSCode's `scroll-sync.ts`), offsets relative to `#content` |
 | `web/src/scroller.js` | keyboard motions planned as per-frame trajectories: hold j/k = velocity, d/u/f/b/gg/G = eased jumps; wheel/trackpad input stops them |
 | `web/src/mermaid.js`, `find.js` | lazy mermaid with SVG cache; in-page search |

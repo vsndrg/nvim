@@ -18,6 +18,11 @@
 // then caught up in one step). Until the scroll ends, the content just stays
 // offset by k.
 //
+// The native scrollbar shows the scroll position, so while a motion plays the
+// scroll position follows it in whole pixels every frame, and <body> is moved
+// back by the distance c scrolled so far, in the same rendering update: the
+// content stays where the animation puts it, whenever that commit lands.
+//
 // A keyboard motion is a trajectory sampled at the display frame rate. New
 // input (releasing a key) replaces it with one that continues from the current
 // position and velocity. The replacement only shows up a few frames after the
@@ -34,10 +39,12 @@ const HANDOFF_FRAMES = 4;
 const content = () => document.getElementById('content');
 
 let k = 0; // offset of #content from the scroll position while nothing plays
-let motion = null; // { t0, h, xs, ks, anim }: xs page offsets, ks = xs - scrollY
+let c = 0; // distance scrolled along with the motions, <body> moved back by it
+let motion = null; // { t0, h, xs, ks, anim }: xs page offsets, ks = xs - (scrollY - c)
 let outgoing = []; // { anim, until }: replaced motions still playing underneath
 let loop = 0;
 let scrolling = false; // a native scroll is in flight (until its scrollend)
+let ownY = 0; // scroll position our own scrolls left
 const listeners = [];
 
 // ------------------------------------------------------------ frame clock
@@ -114,7 +121,7 @@ function kAt(t) {
 
 // Page offset shown at time `t` (default: this frame).
 export function y(t = now()) {
-  return window.scrollY + kAt(t);
+  return window.scrollY - c + kAt(t);
 }
 
 // Velocity at time `t`, px/s.
@@ -173,6 +180,20 @@ function setK(value) {
   content().style.transform = value ? `translateY(${-value}px)` : '';
 }
 
+function setC(value) {
+  c = value;
+  document.body.style.transform = value ? `translateY(${value}px)` : '';
+}
+
+// Scrolls by `dy` from the page, telling these scrolls from native ones.
+// Returns the distance actually scrolled (the page end clamps it).
+function scrollOwn(dy) {
+  const before = window.scrollY;
+  window.scrollBy(0, dy);
+  ownY = window.scrollY;
+  return ownY - before;
+}
+
 // Drops the motion's animations; the content rests at offset `k`.
 function finish() {
   motion?.anim.cancel();
@@ -182,9 +203,17 @@ function finish() {
 }
 
 function fold() {
-  if (!k) return;
-  window.scrollBy(0, k);
+  if (!k && !c) return;
+  scrollOwn(k - c);
   setK(0);
+  setC(0);
+}
+
+// Brings the scroll position (and so the scrollbar) to where the motion is
+// at time `t`.
+function follow(t) {
+  const d = Math.round(kAt(t) - c);
+  if (d) setC(c + scrollOwn(d));
 }
 
 // Longest keyframe segment, in frames. Core Animation holds each segment's
@@ -213,6 +242,8 @@ function frameLoop(t) {
     k = motion.ks[motion.ks.length - 1];
     finish();
     if (!scrolling) fold();
+  } else if (motion && !scrolling) {
+    follow(t);
   }
   notify();
   loop = motion || outgoing.length ? requestAnimationFrame(frameLoop) : 0;
@@ -223,7 +254,9 @@ export function setY(to) {
   pending.length = 0;
   finish();
   setK(0);
+  setC(0);
   window.scrollTo(0, snap(clampY(to)));
+  ownY = window.scrollY;
   notify();
 }
 
@@ -237,7 +270,7 @@ export function play(xs, h) {
   for (let i = 0; i < HANDOFF_FRAMES; i++) lead.push(y(t0 + i * h));
   xs = lead.concat(xs).map((x) => Math.min(Math.max(x, 0), max));
   xs[xs.length - 1] = snap(xs[xs.length - 1]);
-  const s = window.scrollY;
+  const s = window.scrollY - c;
   const ks = xs.map((x) => x - s);
   // The current motion keeps playing underneath until the new one surely
   // shows (the new animation is created later, so it wins once it does).
@@ -256,7 +289,7 @@ export function play(xs, h) {
 
 export function init() {
   window.addEventListener('scroll', () => {
-    scrolling = true;
+    if (window.scrollY !== ownY) scrolling = true;
     notify();
   }, { passive: true });
   window.addEventListener('scrollend', () => {

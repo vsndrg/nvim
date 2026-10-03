@@ -17,6 +17,10 @@ html, body {
   will-change: transform;
 }
 
+/* Moved back by what the page scrolled along with a keyboard motion
+ * (viewport.js), so the native scrollbar follows the motion. */
+body { will-change: transform; }
+
 /* Scrollbar in theme colours. The track must be opaque: the webview does not
  * draw a background of its own, so a transparent gutter shows Neovide behind. */
 ::-webkit-scrollbar { width: 10px; height: 10px; }
