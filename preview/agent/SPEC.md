@@ -6,7 +6,7 @@ second provider. Adding a third file type must mean writing a provider, not touc
 Quality bar (non-negotiable):
 - No hacks, no copy-paste between providers, fix root causes. Prefer mature libraries over own code.
 - No regressions in markdown: behaviour, smoothness (see CLAUDE.md reference numbers), keys.
-- Every decision that could reasonably go either way is written to `DECISIONS.md` (one line: what, why, how to revert).
+- Every decision that could reasonably go either way is written to `preview/work/DECISIONS.md` (one line: what, why, how to revert).
 
 ## Scope v1
 
@@ -75,7 +75,11 @@ Web:
 
 ## Acceptance criteria
 
-Automated (the agent must make these pass; see HARNESS.md for tiers):
+PDF corpus (`preview/test/pdf/`): text-heavy LaTeX (built from a `.tex` kept in the repo), scanned image,
+500+ pages, Cyrillic + CJK, rotated pages, internal links/outline, broken file, encrypted file.
+Oracles: `pdftoppm` (render), `pdftotext` (text/find).
+
+Automated (the agent must make these pass; see WORKFLOW.md for gates):
 - markdown: P1 characterization suite green, bench/probe within noise of the P1 baseline;
 - PDF render: each corpus page matches a `pdftoppm` rasterisation at the same scale within the
   perceptual threshold fixed in P1/P3;

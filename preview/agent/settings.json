@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git -C ~/.config/nvim merge --ff-only agent/preview)"
+    ],
+    "deny": [
+      "Bash(git push)",
+      "Bash(git push *)",
+      "Bash(sudo *)",
+      "Edit(~/.config/nvim/**)",
+      "Edit(~/.local/share/neovide-patched/**)"
+    ]
+  }
+}
