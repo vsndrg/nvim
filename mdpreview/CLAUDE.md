@@ -15,7 +15,7 @@ macOS + patched Neovide only. In any other UI `<leader>mp` shows a single notifi
 | `web/src/main.js` | page runtime: message dispatcher, DOM diff (morphdom), mouse, keys, theming |
 | `web/src/viewport.js` | scroll position: the document scrolls natively (trackpad, scrollbar, find, anchors); keyboard motions animate `#content`'s transform on the compositor (Core Animation); the scroll position follows them in whole pixels every frame with `<body>` moved back by the same distance (so the native scrollbar moves), and the rest is folded in when they end |
 | `web/src/scroll-sync.js` | source line ↔ page offset (port of VSCode's `scroll-sync.ts`), offsets relative to `#content` |
-| `web/src/scroller.js` | keyboard motions planned as per-frame trajectories: hold j/k = velocity, d/u/f/b/gg/G = eased jumps; wheel/trackpad input stops them |
+| `web/src/scroller.js` | keyboard motions planned as per-frame trajectories: held j/k/d/u/f/b = velocity (a d/u/f/b tap lands exactly one step away), gg/G = eased jumps; wheel/trackpad input stops them |
 | `web/src/mermaid.js`, `find.js` | lazy mermaid with SVG cache; in-page search |
 | `web/themes/*.css` | `themes.css` maps every theme onto github-markdown-css variables; `preview.css` page chrome |
 | `web/build.mjs` | esbuild IIFE bundles → `web/dist/` (gitignored), plus `dist/dev.html` fed with `test/kitchen-sink.md` |
@@ -81,7 +81,7 @@ Lines are 0-based markdown-it `map[0]` values.
 
 ## Keyboard model
 
-- While the view window is current in normal mode, Lua gives the webview the keyboard on `SafeState` (`set_webview_focus`, `PAGE_KEYS`). This lets JS see keydown and keyup, so held `j`/`k` scroll smoothly with no key-repeat delay.
+- While the view window is current in normal mode, Lua gives the webview the keyboard on `SafeState` (`set_webview_focus`, `PAGE_KEYS`). This lets JS see keydown and keyup, so held `j`/`k`/`d`/`u`/`f`/`b` scroll smoothly with no key-repeat delay.
 - Neovide routes every other key to nvim natively.
 - Release focus on every way out of "view current, normal mode": `WinLeave`, `BufLeave` (`:e #` in the same window) and `ModeChanged`.
   - Why: a routed key sends `blur` before nvim has processed the key itself, so `SafeState` hands focus back to the page first.
@@ -136,7 +136,7 @@ Lines are 0-based markdown-it `map[0]` values.
 - View window options go through `set_win_local` (`scope = "local"`). `vim.wo[win].x = v` acts like `:set` and changes the global value too: `signcolumn=no`, `nonumber` and `winfixbuf` then leaked into every buffer opened later (gitsigns and line numbers disappeared).
 - A dev Neovide started while another instance of the same channel runs can come up with no window, and webview commands are then dropped. This is intermittent, so just retry.
 - Scroll judder at 120 Hz:
-  - WebKit's rAF timestamps have 1 ms resolution and ±2 ms jitter around the vsync a frame is shown at; integrating velocity over them gave 10–16 px steps for 12.5 px/frame. Motions are planned in whole frames of an estimated refresh period, at an integral full-speed step with hysteresis (1500 px/s × 8.33 ms sits exactly on a rounding boundary).
+  - WebKit's rAF timestamps have 1 ms resolution and ±2 ms jitter around the vsync a frame is shown at; integrating velocity over them gave 10–16 px steps for 12.5 px/frame. Motions are planned in whole frames of an estimated refresh period, at an integral full-speed step with hysteresis (the earlier 1500 px/s × 8.33 ms sat exactly on a rounding boundary).
   - Any scroll driven from WebContent misses ~10–15 % of vsyncs as stall+double pairs: JS `scrollTo` (even a trivial loop), WebKit's own smooth keyboard scrolling. Native wheel scrolling has them too, less often. CPU is not the cause (main threads 94–95 % idle), nor is Neovide. Hence keyboard motions are Web Animations on `#content`'s transform, played by Core Animation; the trackpad stays native (its input is uneven anyway, and native feels right).
 - Core Animation / WebKit facts behind `viewport.js` (measured with the probe, in an isolated WKWebView host and in Neovide):
   - `scrollBy(k)` plus dropping a static `translateY(-k)` in the same rendering update are applied together: no flash. This needs `#content` in the normal flow. An earlier note here said they race, and a fixed wrapper moved by a scroll-driven animation was built around that. Both were wrong.

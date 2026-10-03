@@ -383,18 +383,22 @@ function handlePreviewKey(e) {
       scroller.holdStart(-1);
       return true;
     case 'd':
-      scroller.jumpBy(page() / 2);
+      state.followLine = null;
+      scroller.holdStart(1, page() / 2);
       return true;
     case 'u':
-      scroller.jumpBy(-page() / 2);
+      state.followLine = null;
+      scroller.holdStart(-1, page() / 2);
       return true;
     case 'f':
     case 'PageDown':
-      scroller.jumpBy(fullPage());
+      state.followLine = null;
+      scroller.holdStart(1, fullPage());
       return true;
     case 'b':
     case 'PageUp':
-      scroller.jumpBy(-fullPage());
+      state.followLine = null;
+      scroller.holdStart(-1, fullPage());
       return true;
     case 'G':
     case 'End':
@@ -446,10 +450,16 @@ document.addEventListener('keydown', (e) => {
   releaseFocus(replay ?? undefined);
 }, true);
 
+// Direction of the keys that scroll while held (keyup may come shifted).
+const HOLD_KEYS = {
+  j: 1, ArrowDown: 1, d: 1, f: 1, PageDown: 1,
+  k: -1, ArrowUp: -1, u: -1, b: -1, PageUp: -1,
+};
+
 document.addEventListener('keyup', (e) => {
   const key = layoutFreeKey(e);
-  if (key === 'j' || key === 'J' || key === 'ArrowDown') scroller.holdEnd(1);
-  if (key === 'k' || key === 'K' || key === 'ArrowUp') scroller.holdEnd(-1);
+  const dir = HOLD_KEYS[key.length === 1 ? key.toLowerCase() : key];
+  if (dir) scroller.holdEnd(dir);
 }, true);
 
 // A lost keyup (focus moved mid-hold) must not leave the page scrolling.
