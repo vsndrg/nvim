@@ -135,6 +135,14 @@ export function jumpTo(y) {
   vp.atFrame(() => simulate(settle(vp.y(vp.handoffTime()), vp.velocity(vp.handoffTime()), target, JUMP_TAU)));
 }
 
+// Ends the motion in flight where it is headed, at once (a held key is
+// released first).
+export function finishNow() {
+  if (holdDir) holdEnd();
+  jumpTarget = null;
+  vp.settle();
+}
+
 // Stops the current motion where it is by the time this reaches the screen.
 export function cancel() {
   holdDir = 0;

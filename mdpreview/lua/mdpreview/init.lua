@@ -352,7 +352,7 @@ local function open_link(s, href)
     if target and target.mode == "preview" then
       -- Brought back by its BufWinEnter handler (scheduled): start at the anchor.
       if anchor ~= "" then
-        target.preview_line = topline(win) - 1
+        target.goto_line = topline(win) - 1
       end
     else
       M.open(buf, "preview")
@@ -502,11 +502,15 @@ local function show_view(s, win)
   api.nvim_set_current_win(win)
 end
 
--- Preview mode, the source just came back into `win`.
+-- Preview mode, the source just came back into `win`. The page kept its
+-- position while hidden; it only moves when a position was asked for
+-- (`goto_line`, a link to an anchor).
 local function enter_preview(s, win)
   show_view(s, win)
   rebind(s)
-  if s.preview_line then
+  if s.goto_line then
+    s.preview_line = s.goto_line
+    s.goto_line = nil
     post(s, { type = "scroll", action = "toline", n = s.preview_line })
   end
 end

@@ -160,6 +160,16 @@ vp.onChange(() => {
   postScrolled(false);
 });
 
+// Hidden (another file edited over the preview): a motion in flight would
+// stop halfway, as no frames come to play it. It ends where it was headed,
+// and nvim learns the position the preview comes back at.
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState !== 'hidden') return;
+  scroller.finishNow();
+  clearTimeout(settleTimer);
+  postScrolled(true);
+});
+
 // Late-loading images shift the layout under a followed position.
 document.addEventListener('load', (e) => {
   if (e.target.tagName === 'IMG') {

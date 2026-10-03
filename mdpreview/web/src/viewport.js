@@ -161,6 +161,14 @@ export function atFrame(fn) {
   if (!pendingFrame) pendingFrame = requestAnimationFrame(runPending);
 }
 
+// Comes to rest at once where the motions in flight were headed: a hidden
+// page gets no frames to play them (WebKit stops rAF while it is hidden).
+export function settle() {
+  if (pendingFrame) cancelAnimationFrame(pendingFrame);
+  runPending();
+  if (motion) setY(motion.xs[motion.xs.length - 1]);
+}
+
 export function isMoving() {
   return motion != null || pending.length > 0;
 }

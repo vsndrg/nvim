@@ -71,6 +71,8 @@ Lines are 0-based markdown-it `map[0]` values.
 - Markdown files open as a preview (`setup({ auto = false })` turns this off). This applies only to normal file buffers in non-floating, non-diff windows, and not to new or empty files.
 - Each buffer remembers its mode: `<CR>` / `<leader>mp` to code stays code when you come back.
 - Editing another file over a preview does not close the session. It waits in `preview` mode, and the preview comes back when the source is shown again (`attach_autocmds`, `reenter_win`).
+- The page keeps its scroll position while hidden, so coming back does not move it. Only an explicit request does: `goto_line` (set by a link to an anchor in another document).
+- A hidden webview gets no rAF, so a motion in flight would stop halfway. On `visibilitychange` to hidden, the page ends it at once where it was headed (`scroller.finishNow`) and posts the exact `scrolled` line. Before this fix, `f` followed quickly by `<C-b>` came back a page short.
 - The view buffer is never anyone's alternate file:
   - source and view are swapped with `keepalt buffer` (`swap_buf`);
   - a `BufEnter` hook turns a view-buffer alternate into its source.
