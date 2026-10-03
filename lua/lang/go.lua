@@ -659,6 +659,10 @@ M.keymaps = {
   {
     group = "Navigate & project",
     items = {
+      { "gi",         "implementations / implemented interfaces (↓ ↑)",
+        function(b) require("lang.go_lens").open(b) end },
+      { "gu",         "usages",
+        function(b) require("lang.go_lens").usages(b) end },
       { "<leader>go", "jump between file and _test.go", go_command("GoAlt!") },
       { "<leader>gd", "godoc for symbol",               go_command("GoDoc") },
       { "<leader>gc", "toggle coverage overlay",        go_command("GoCoverage") },
@@ -773,6 +777,7 @@ function M.setup_autocmds()
       local client = vim.lsp.get_client_by_id(args.data.client_id)
       if not client or client.name ~= "gopls" then return end
       on_gopls_attach(client, args.buf)
+      require("lang.go_lens").attach(args.buf)
       if vim.lsp.inlay_hint then
         vim.lsp.inlay_hint.enable(true, { bufnr = args.buf })
       end
@@ -911,6 +916,7 @@ function M.setup()
   ensure_path()
   M.setup_server()
   M.setup_autocmds()
+  require("lang.go_lens").setup()
 
   vim.api.nvim_create_user_command("GoProjectTags", function()
     M.refresh_build_tags()
