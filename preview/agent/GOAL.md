@@ -6,6 +6,10 @@
 3. System Settings → Privacy & Security: Screen Recording and Accessibility for the terminal.
 4. `git -C ~/.config/nvim worktree add ~/src/preview-agent -b agent/preview`
 5. `cd ~/src/preview-agent && claude`: accept the trust dialog once, exit.
+6. Check the hooks fire: start the session as in "Each run" and ask `append a line "x" to
+   preview/agent/SPEC.md`. Expected: "is protected (always)" (Edit refused) or "Restored protected files"
+   (shell write reverted). Then `/exit`; `git status` in the worktree must be clean.
+   Hook logic tests: `python3 preview/agent/hooks/test_hooks.py`.
 
 ## Each run
 In tmux, Mac on power, screen not locked (a locked screen gives black screenshots and red visual checks):

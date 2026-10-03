@@ -13,20 +13,20 @@ BLOCKED.md, PENDING.md, `notes/<task-slug>.md`. Nobody answers questions during 
   why it failed and its best hypothesis. Attempt 2 must not repeat a listed approach. Attempt 3 starts by
   questioning the assumptions and asking a second fresh subagent for the root cause.
 - After 3 failed attempts: mark `- [!]`, put the reason in BLOCKED.md, move on. A task that depends on a
-  blocked one is blocked too.
+  blocked one is blocked too. A hook enforces the cap: the 6th subagent run on one task is refused
+  (3 attempts + a second opinion + a spare); when that happens, block the task the same way.
 - Needs Egor (a decision outside SPEC, a permission, hardware): the exact question in BLOCKED.md, `- [!]`,
   move on.
 - Decisions that could go either way: one line in DECISIONS.md (what, why, how to revert); don't deliberate.
 
 ## Gates (`- [ ] GATE Pn`)
 1. `preview/test/run.sh gate Pn` exits 0. Before P1 exists: the build passes and the phase's deliverables exist.
-2. Protected files are unchanged since their gate: `git diff --stat gate/P1 HEAD -- <P1 paths>` (and
-   `gate/P3a` for P3a paths) prints nothing.
-3. A fresh read-only reviewer subagent reviews `git diff <previous gate tag, or main>..HEAD` against SPEC:
+2. A fresh read-only reviewer subagent reviews `git diff <previous gate tag, or main>..HEAD` against SPEC:
    no hacks or symptom fixes, no duplicated logic between providers/renderers, the core has no provider
    knowledge, nothing reimplemented that a chosen library provides, tests not weakened, docs updated.
    Its findings become tasks inserted before the gate.
-4. All green: tick the gate, `git tag gate/Pn`, then exactly
+3. All green: tick the gate and commit everything (the tag is the baseline protected files are
+   measured from), `git tag gate/Pn`, then exactly
    `git -C ~/.config/nvim merge --ff-only agent/preview` (pre-approved). If it fails, note it in
    BLOCKED.md and continue; Egor merges.
 
@@ -37,8 +37,9 @@ BLOCKED.md, PENDING.md, `notes/<task-slug>.md`. Nobody answers questions during 
 - after GATE P3a: `preview/test/pdf/**`, `preview/test/e2e/pdf/**`, `preview/test/golden/pdf/**`,
   `preview/test/thresholds/pdf.json`
 
-Never loosen a threshold or regenerate a golden to get green. If one looks wrong, write why in PENDING.md
-and continue.
+Hooks enforce this (`preview/agent/hooks/`): edits are refused, and changes made through the shell are
+restored from the baseline after each command. Never try to get around them; if a file looks wrong, write
+why in PENDING.md and continue.
 
 ## Boundaries
 - Work in this worktree and in `~/src/neovide` (branch `agent/<topic>` off `webview`, following its rules in

@@ -6,9 +6,28 @@
     "deny": [
       "Bash(git push)",
       "Bash(git push *)",
+      "Bash(git tag -d *)",
+      "Bash(git tag --delete *)",
+      "Bash(git tag -f *)",
+      "Bash(git tag --force *)",
+      "Bash(git update-ref *)",
       "Bash(sudo *)",
       "Edit(~/.config/nvim/**)",
       "Edit(~/.local/share/neovide-patched/**)"
+    ]
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Edit|Write|MultiEdit|NotebookEdit|Agent|Task",
+        "hooks": [{ "type": "command", "command": "python3 -B \"${CLAUDE_PROJECT_DIR}/preview/agent/hooks/guard.py\"", "timeout": 15 }]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [{ "type": "command", "command": "python3 -B \"${CLAUDE_PROJECT_DIR}/preview/agent/hooks/restore.py\"", "timeout": 30 }]
+      }
     ]
   }
 }
