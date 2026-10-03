@@ -131,6 +131,7 @@ Lines are 0-based markdown-it `map[0]` values.
 - `drawsBackground = false` makes a transparent scrollbar track show Neovide behind it. The track is painted with `--page-bg`.
 - A `<base href=docDir>` is set for relative images and links. Resolve our own assets (`mermaid.min.js`) from `document.currentScript`.
 - No buffer-local `<Space>` mapping in the view buffer: leader is space.
+- View window options go through `set_win_local` (`scope = "local"`). `vim.wo[win].x = v` acts like `:set` and changes the global value too: `signcolumn=no`, `nonumber` and `winfixbuf` then leaked into every buffer opened later (gitsigns and line numbers disappeared).
 - A dev Neovide started while another instance of the same channel runs can come up with no window, and webview commands are then dropped. This is intermittent, so just retry.
 - Scroll judder at 120 Hz:
   - WebKit's rAF timestamps have 1 ms resolution and ±2 ms jitter around the vsync a frame is shown at; integrating velocity over them gave 10–16 px steps for 12.5 px/frame. Motions are planned in whole frames of an estimated refresh period, at an integral full-speed step with hysteresis (1500 px/s × 8.33 ms sits exactly on a rounding boundary).

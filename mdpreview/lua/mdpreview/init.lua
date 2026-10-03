@@ -165,9 +165,17 @@ local VIEW_WIN_OPTS = {
   fillchars = "eob: ",
 }
 
+-- Window options are set with scope = "local" (:setlocal): plain vim.wo[win]
+-- behaves like :set and also changes the global value, which every buffer
+-- entering a window afterwards inherits (signcolumn=no hid gitsigns,
+-- number=false hid line numbers everywhere).
+local function set_win_local(win, name, value)
+  api.nvim_set_option_value(name, value, { scope = "local", win = win })
+end
+
 local function setup_view_window(win)
   for k, v in pairs(VIEW_WIN_OPTS) do
-    vim.wo[win][k] = v
+    set_win_local(win, k, v)
   end
 end
 
@@ -490,7 +498,7 @@ end
 local function show_view(s, win)
   swap_buf(win, s.view)
   setup_view_window(win)
-  vim.wo[win].winfixbuf = false
+  set_win_local(win, "winfixbuf", false)
   api.nvim_set_current_win(win)
 end
 
@@ -734,7 +742,7 @@ set_mode = function(s, mode)
       local win = api.nvim_get_current_win()
       api.nvim_win_set_buf(win, s.view)
       setup_view_window(win)
-      vim.wo[win].winfixbuf = true
+      set_win_local(win, "winfixbuf", true)
     end)
     s.src_win = src_win
     api.nvim_set_current_win(src_win)
