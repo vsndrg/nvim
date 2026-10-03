@@ -25,6 +25,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import traceback
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -53,6 +54,9 @@ NEOVIDE_BASE = "webview"
 
 STEP_TIMEOUT = int(os.environ.get("PREVIEW_STEP_TIMEOUT", 3 * 3600))  # one claude session
 CHECK_TIMEOUT = int(os.environ.get("PREVIEW_CHECK_TIMEOUT", 3600))  # one run.sh call
+MAX_TURNS = int(os.environ.get("PREVIEW_MAX_TURNS", 300))  # per session; 0 = no cap
+TASK_BUDGET = float(os.environ.get("PREVIEW_TASK_BUDGET", 50))  # estimated USD per task; 0 = no cap
+VERIFY_FIXES = 2          # DONE whose check failed: resume the same session this many times first
 MAX_ATTEMPTS = 3          # per task; a second opinion comes before the last one
 MAX_INTERRUPTS = 3        # sessions that ended without a status (crash, timeout) = 1 failed attempt
 MAX_INFRA = 20            # consecutive sessions without a status (limits, outages) -> STOP
@@ -78,6 +82,14 @@ PROMPTS = {"implement": "IMPLEMENTER.md", "review": "REVIEW.md", "opinion": "OPI
 LIMIT_RE = re.compile(r"usage limit|hit your [\w ]*limit|session limit|weekly limit|rate.?limit|"
                       r"limit (reached|exceeded)|\bresets\b|\b(429|529)\b|overloaded|high load|capacity|quota",
                       re.I)
+RESUME_LIMIT = ("run.py: this session was cut off by a usage limit, which has reset now. Continue the same "
+                "task where you stopped (your edits and commits are still in place), then answer as "
+                "instructed, status line first.")
+NUDGE = ("run.py: your last message had no status line. Answer again in the required format: the first "
+         "line is exactly one of DONE, FAILED, ENV, NEEDS-EGOR.")
+FIX_AFTER_DONE = ("run.py: you returned DONE, but run.py's own check failed:\n{why}\n\nFix it in place "
+                  "(don't start over), run that check yourself, commit, then answer as instructed, status "
+                  "line first.")
 RESET_RE = re.compile(r"resets\s+(?:(\w{3})\s+)?(\d{1,2})(?::(\d{2}))?\s*([ap]m)", re.I)
 
 
@@ -214,11 +226,12 @@ class Run:
     def __init__(self, args):
         self.args = args
         self.state = policy.load_state(ROOT, STATE)
-        for k in ("attempts", "interrupts", "notes", "gatefix", "review", "gate_neovide"):
+        for k in ("attempts", "interrupts", "notes", "gatefix", "review", "gate_neovide", "task_cost"):
             self.state.setdefault(k, {})
         self.state.setdefault("infra", 0)
         self.state.setdefault("cost", 0.0)
         self.run_cost = 0.0
+        self.last_cost = 0.0
         self.green = {}
         self.live = None
         self.seq = 0
@@ -391,16 +404,30 @@ class Run:
     def salvage(self):
         """Before writing STOP.md: put aside whatever an unfinished step left (refs/wip/stop)."""
         keep = self.agent_files()
+        refs = []
         for repo, key, branch in ((ROOT, "nvim", BRANCH), (NEOVIDE, "neovide", NEOVIDE_BRANCH)):
             ref = self.wip_save(repo, key, "refs/wip/stop", "wip left when the run stopped")
             if ref:
                 log(f"{repo}: unfinished work saved in {ref}")
+                refs.append(f"{'' if repo == ROOT else '~/src/neovide-agent '}{ref}")
                 self.reset(repo, key, branch)
         for rel, data in keep.items():
             p = ROOT / rel
             p.parent.mkdir(parents=True, exist_ok=True)
             p.write_bytes(data)
         self.restore_owned()
+        self.drop_resume("the run stopped", refs)
+
+    def drop_resume(self, why, refs):
+        """A session waiting to be resumed can't be once the worktrees were reset: note where its work is."""
+        pend = self.state.pop("resume", None)
+        if not pend:
+            return
+        self.save()
+        log(f"{pend['task']}: session {pend.get('session')} will not be resumed ({why})")
+        self.append(f"{WORK}/notes/{pend['task']}.md",
+                    f"\n(run.py, {now()}) Attempt {pend['n']}: {why} while its session waited to be resumed; "
+                    "the next start is a fresh session." + (f" Its work is kept in {', '.join(refs)}." if refs else ""))
 
     # -- checks ---------------------------------------------------------------------------------
 
@@ -463,8 +490,9 @@ class Run:
         out.write_text("\n\n---\n\n".join(parts))
         return out
 
-    def claude(self, role, prompt, label):
-        """One fresh session. -> dict(text, error, limit) where error means: no usable answer."""
+    def claude(self, role, prompt, label, resume=None):
+        """One session (fresh, or `resume`d by id). -> dict(text, error, limit, session, cutoff) where
+        error means: no usable answer, and cutoff: run.py's own caps (timeout, max turns) ended it."""
         self.seq += 1
         base = ROOT / OUT / f"{self.seq:04d}-{label.replace(' ', '_')}"
         base.with_suffix(".prompt.md").write_text(prompt)
@@ -474,10 +502,15 @@ class Run:
                "--strict-mcp-config", "--disable-slash-commands", "--no-chrome",
                "--append-system-prompt-file", str(self.system_prompt(role)),
                "--tools", TOOLS[role], "--disallowedTools", "mcp__*"]
+        if MAX_TURNS:
+            cmd += ["--max-turns", str(MAX_TURNS)]
+        if resume:
+            cmd += ["--resume", resume]
         if EFFORT:
             cmd += ["--effort", EFFORT]
-        log(f"session {label} ({role}) started")
+        log(f"session {label} ({role}) {'resumed from ' + resume if resume else 'started'}")
         t0 = time.time()
+        timed_out = False
         proc = subprocess.Popen(cmd, cwd=str(ROOT), stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                                 text=True, env={**os.environ, "PREVIEW_ROLE": role},
                                 start_new_session=True)
@@ -486,6 +519,7 @@ class Run:
             out, err = proc.communicate(timeout=STEP_TIMEOUT)
         except subprocess.TimeoutExpired:
             kill(proc)
+            timed_out = True
             out, err = proc.communicate()
             err = f"run.py: session timed out after {STEP_TIMEOUT}s\n{err}"
         finally:
@@ -501,15 +535,22 @@ class Run:
             {"exit": proc.returncode, "result": data, "stdout_tail": (out or "")[-4000:],
              "stderr": (err or "")[-4000:]}, indent=1))
         cost = float(data.get("total_cost_usd") or 0)
+        self.last_cost = cost
         self.run_cost += cost
         self.state["cost"] = self.state.get("cost", 0.0) + cost
         text = data.get("result") if isinstance(data.get("result"), str) else ""
         error = proc.returncode != 0 or bool(data.get("is_error")) or not text.strip()
-        limit = bool(LIMIT_RE.search(f"{text}\n{out}\n{err}")) if error else False
+        cutoff = None
+        if error and timed_out:
+            cutoff = f"the session hit run.py's timeout ({STEP_TIMEOUT}s); keep steps shorter"
+        elif error and "max_turns" in str(data.get("subtype", "")):
+            cutoff = f"the session hit --max-turns {MAX_TURNS}; take a shorter path or split the work"
+        limit = bool(LIMIT_RE.search(f"{text}\n{out}\n{err}")) if error and not cutoff else False
         self.reset_at = reset_time(f"{text}\n{out}\n{err}") if limit else None
         log(f"session {label} ended: exit {proc.returncode}, {time.time() - t0:.0f}s, ${cost:.2f}, "
             f"session {data.get('session_id', '?')}: {one_line(text or err, 160)}")
-        return {"text": text.strip(), "error": error, "limit": limit}
+        return {"text": text.strip(), "error": error, "limit": limit, "cutoff": cutoff,
+                "session": data.get("session_id") or None}
 
     def infra(self, what, limit):
         """A session ended without a usable answer: wait (limits, outages) and let the loop retry."""
@@ -561,6 +602,7 @@ class Run:
                   f"({WORK}/notes/{item.id}.md):\n\n{self.notes(item.id)}\n")
         for _ in range(2):
             r = self.claude("opinion", prompt, f"{item.id}-opinion")
+            self.charge(item.id)
             self.check_live(f"the second opinion on {item.id}")
             if not r["error"]:
                 self.state["infra"] = 0
@@ -569,32 +611,79 @@ class Run:
                 self.infra(f"second opinion on {item.id}", True)
         return None
 
+    def charge(self, tid):
+        self.state["task_cost"][tid] = self.state["task_cost"].get(tid, 0.0) + self.last_cost
+
+    def failed(self, item, n, text, note=None):
+        """The attempt failed: save its work, reset, and block the task after the last attempt."""
+        st = self.state
+        st["attempts"][item.id] = n
+        st["interrupts"][item.id] = 0
+        st["notes"][item.id] = one_line(text, 1500)
+        self.rollback(item.id, n, "failed", note)
+        if n >= MAX_ATTEMPTS:
+            self.block(item, f"{MAX_ATTEMPTS} attempts failed")
+
     def task(self, item):
         items = {it.id: it for it in parse_plan(self.plan_text())}
         dead = [x for x in item.needs if x in items and items[x].box == "!"]
-        if dead:
-            return self.block(item, f"depends on blocked {', '.join(dead)}")
         st = self.state
-        n = st["attempts"].get(item.id, 0) + 1
-        if n > MAX_ATTEMPTS:  # Egor reopened it: a fresh cap
-            log(f"{item.id} reopened: attempts reset")
-            st["attempts"][item.id], st["interrupts"][item.id], n = 0, 0, 1
-        second = self.opinion(item) if n == MAX_ATTEMPTS else None
-        prompt = "\n".join(filter(None, [
-            f"Task {item.id}: {item.text}",
-            f"Attempt {n} of {MAX_ATTEMPTS}. Notes file: {WORK}/notes/{item.id}.md",
-            f"Work from: {BRANCH} at {self.green['nvim'][:12]} (this worktree) and "
-            f"{NEOVIDE_BRANCH} at {self.green['neovide'][:12]} (~/src/neovide-agent).",
-            st["notes"].get(item.id) and f"Previous attempt: {st['notes'][item.id]}",
-            second and f"Second opinion (start by checking its assumptions):\n{second}",
-            f"\n## {WORK}/CONTEXT.md\n\n{self.context()}",
-            f"\n## {WORK}/notes/{item.id}.md\n\n{self.notes(item.id)}",
-        ]))
-        r = self.claude("implement", prompt, f"{item.id}-a{n}")
+        pend = st.pop("resume", None)
+        if pend and pend.get("task") != item.id:  # shouldn't happen: start() and salvage() drop it
+            self.rollback(pend["task"], pend["n"], f"the plan moved on to {item.id} before its session "
+                          "was resumed")
+            pend = None
+        if dead and not pend:
+            return self.block(item, f"depends on blocked {', '.join(dead)}")
+        spent = st["task_cost"].get(item.id, 0.0)
+        if TASK_BUDGET and spent >= TASK_BUDGET:
+            n = pend["n"] if pend else max(st["attempts"].get(item.id, 0), 1)
+            st["task_cost"].pop(item.id, None)  # a reopened task gets a fresh budget
+            self.rollback(item.id, n, f"estimated spend reached {TASK_BUDGET:g} USD")
+            return self.block(item, f"estimated spend for this task reached {spent:.2f} USD "
+                                    f"(PREVIEW_TASK_BUDGET={TASK_BUDGET:g})")
+        resumed = pend is not None
+        if resumed:
+            n = pend["n"]
+            r = self.claude("implement", pend["prompt"], f"{item.id}-a{n}-{pend['why']}", resume=pend["session"])
+        else:
+            n = st["attempts"].get(item.id, 0) + 1
+            if n > MAX_ATTEMPTS:  # Egor reopened it: a fresh cap
+                log(f"{item.id} reopened: attempts reset")
+                st["attempts"][item.id], st["interrupts"][item.id], n = 0, 0, 1
+            second = self.opinion(item) if n == MAX_ATTEMPTS else None
+            prompt = "\n".join(filter(None, [
+                f"Task {item.id}: {item.text}",
+                f"Attempt {n} of {MAX_ATTEMPTS}. Notes file: {WORK}/notes/{item.id}.md",
+                f"Work from: {BRANCH} at {self.green['nvim'][:12]} (this worktree) and "
+                f"{NEOVIDE_BRANCH} at {self.green['neovide'][:12]} (~/src/neovide-agent).",
+                st["notes"].get(item.id) and f"Previous attempt: {st['notes'][item.id]}",
+                second and f"Second opinion (start by checking its assumptions):\n{second}",
+                f"\n## {WORK}/CONTEXT.md\n\n{self.context()}",
+                f"\n## {WORK}/notes/{item.id}.md\n\n{self.notes(item.id)}",
+            ]))
+            r = self.claude("implement", prompt, f"{item.id}-a{n}")
+            pend = {"task": item.id, "n": n, "fixes": 0, "nudged": False}
+        self.charge(item.id)
+        pend["session"] = r["session"] or pend.get("session")
         self.check_live(f"{item.id} attempt {n}")
         self.check_hooks_log()
+        if r["cutoff"]:  # run.py's own caps: a failed attempt, not an interruption to retry
+            return self.failed(item, n, r["cutoff"], r["cutoff"])
         status = None if r["error"] else self.status_of(r["text"])
         if status is None:
+            if r["limit"] and pend["session"]:  # keep the worktrees as they are and resume after the reset
+                pend.update(prompt=RESUME_LIMIT, why="resume")
+                st["resume"] = pend
+                return self.infra(f"{item.id} attempt {n}", True)
+            if not r["error"] and pend["session"] and not pend["nudged"]:  # answered, but no status line
+                pend.update(prompt=NUDGE, why="status", nudged=True)
+                st["resume"] = pend
+                self.save()
+                return
+            if resumed and r["error"] and not r["limit"]:  # the resume itself failed: start afresh
+                self.rollback(item.id, n, "its session could not be resumed; started afresh")
+                return
             interrupted = "limit" if r["limit"] else "no status"
             if not r["limit"]:
                 st["interrupts"][item.id] = st["interrupts"].get(item.id, 0) + 1
@@ -621,6 +710,7 @@ class Run:
             ok, why, env_broken = self.verify()
             if ok:
                 st["notes"].pop(item.id, None)
+                st["task_cost"].pop(item.id, None)
                 self.restore_owned()
                 self.write(PLAN, set_box(self.plan_text(), item, "x"))
                 self.progress(f"{item.id} done (attempt {n}): {one_line(r['text'], 200)}")
@@ -630,12 +720,16 @@ class Run:
             if env_broken:
                 self.rollback(item.id, n, "environment broken during the DONE check", one_line(why, 600))
                 raise Stop(f"The check after {item.id} found the environment broken:\n{why}")
+            if pend["session"] and pend["fixes"] < VERIFY_FIXES:  # the session has the context: let it fix
+                pend["fixes"] += 1
+                pend.update(prompt=FIX_AFTER_DONE.format(why=why), why=f"fix{pend['fixes']}")
+                st["resume"] = pend
+                self.save()
+                log(f"{item.id}: the check after DONE failed; resuming the session to fix it "
+                    f"({pend['fixes']}/{VERIFY_FIXES})")
+                return
             r["text"] = f"returned DONE, but {why}"
-        st["attempts"][item.id] = n
-        st["notes"][item.id] = one_line(r["text"], 1500)
-        self.rollback(item.id, n, "failed", None if status == "FAILED" else one_line(r["text"], 800))
-        if n >= MAX_ATTEMPTS:
-            self.block(item, f"{MAX_ATTEMPTS} attempts failed")
+        self.failed(item, n, r["text"], None if status == "FAILED" else one_line(r["text"], 800))
 
     # -- gates ----------------------------------------------------------------------------------
 
@@ -766,8 +860,13 @@ class Run:
         self.save()
         log(f"GATE {phase} passed, tagged {tag}")
         bad = protected_changes(ROOT, BRANCH)
+        ahead = git(NEOVIDE, "rev-list", "--count", f"{NEOVIDE_BASE}..{NEOVIDE_BRANCH}", check=False)
         if bad:
             why = "the branch changes protected files: " + ", ".join(bad)
+        elif ahead not in ("", "0"):
+            why = (f"~/src/neovide-agent has {ahead} commit(s) on {NEOVIDE_BRANCH} that are not in "
+                   f"{NEOVIDE_BASE}, so the config may need a Neovide you haven't installed yet. Merge them "
+                   f"into {NEOVIDE_BASE} and install first, then merge {BRANCH} into main")
         else:
             r = sh(LIVE_NVIM, "git", "merge", "--ff-only", BRANCH, check=False)
             why = None if r.returncode == 0 else one_line(r.stderr or r.stdout, 400)
@@ -792,13 +891,18 @@ class Run:
             git(ROOT, "add", "-A", "--", WORK)
             git(ROOT, "commit", "-q", "--no-verify", "-m", "chore(preview-agent): edits to preview/work")
         self.green = {"nvim": head(ROOT), "neovide": head(NEOVIDE)}
+        refs = []
         for repo, key, branch in ((ROOT, "nvim", BRANCH), (NEOVIDE, "neovide", NEOVIDE_BRANCH)):
             if git(repo, "rev-parse", "--abbrev-ref", "HEAD") != branch:
                 raise Stop(f"{repo} is not on {branch}.", clean=True)
             ref = self.wip_save(repo, key, "refs/wip/startup", "wip left by an interrupted run")
             if ref:
                 log(f"{repo}: leftovers of an interrupted run saved in {ref}")
+                refs.append(f"{'' if repo == ROOT else '~/src/neovide-agent '}{ref}")
                 self.reset(repo, key, branch)
+        if self.state.get("resume"):
+            self.drop_resume("the run was restarted", refs)
+            self.commit("note on a session that was not resumed")
         r = sh(ROOT, "git", "merge", "--no-edit", "-q", "main", check=False)
         if r.returncode:
             sh(ROOT, "git", "merge", "--abort", check=False)
@@ -926,19 +1030,42 @@ def main():
         run.start()
         run.loop()
     except Stop as s:
-        log(f"stop: {s.reason}")
-        finished = s.clean and s.reason.startswith(("every task", "--until"))
-        if run.green and not (s.clean and "STOP.md exists" in s.reason):
-            try:
-                run.salvage()
-                if not s.clean:
-                    run.write(f"{WORK}/STOP.md", f"# Stopped {now()}\n\n{s.reason}\n")
-                run.stopped = None if finished else s.reason
-                run.commit("stop" if not s.clean else "end of run")
-            except RuntimeError as e:
-                log(f"final commit failed: {e}")
-        return 0 if finished else (1 if s.clean else 2)
+        return finish(run, s.reason, s.clean)
+    except Exception:  # a bug or an unexpected git/OS failure: stop like any other STOP, never silently
+        tb = traceback.format_exc()
+        log(tb.rstrip())
+        return finish(run, "run.py crashed (a bug or an unexpected git/OS failure):\n\n```\n"
+                      + tb[-3000:].rstrip() + "\n```", False)
     return 0
+
+
+def finish(run, reason, clean):
+    log(f"stop: {one_line(reason, 300)}")
+    finished = clean and reason.startswith(("every task", "--until"))
+    if clean and "STOP.md exists" in reason:
+        return 1
+    stop = f"# Stopped {now()}\n\n{reason}\n"
+    if not clean:  # first, so that STOP.md exists even when saving the work below fails
+        try:
+            run.write(f"{WORK}/STOP.md", stop)
+        except OSError as e:
+            log(f"could not write STOP.md: {e}")
+    if run.green:
+        try:
+            run.salvage()  # restores run.py's own files, STOP.md included: write it again
+            if not clean:
+                run.write(f"{WORK}/STOP.md", stop)
+            run.stopped = None if finished else reason
+            run.commit("stop" if not clean else "end of run")
+        except Exception as e:
+            log(f"saving the work after the stop failed: {e}")
+            if not clean:
+                try:
+                    run.append(f"{WORK}/STOP.md", f"\nSaving the work after the stop failed too: {one_line(e, 600)}. "
+                               "The worktrees may be dirty; the next start saves leftovers in refs/wip/startup.")
+                except OSError:
+                    pass
+    return 0 if finished else (1 if clean else 2)
 
 
 ROOT = Path.cwd()

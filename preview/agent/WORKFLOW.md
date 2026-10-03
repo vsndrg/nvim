@@ -29,14 +29,22 @@ read-only roles get read-only tools, and nobody can start subagents. State lives
   uncommitted in `~/src/neovide-agent`, then `run.sh fast` and (after GATE P1) `run.sh gate <last
   passed gate>` green. Then: run.py's own files restored, `[x]`, a PROGRESS line, one commit of
   everything (that commit is the new "green" base).
-- FAILED, or DONE whose check failed: the attempt's work goes to `refs/wip/<ID>/<n>` (both repos),
+- DONE whose check failed: the same session is resumed (`--resume`) with the failure, up to 2 times;
+  still red after that: FAILED.
+- FAILED, timeout, or `--max-turns` reached (`PREVIEW_MAX_TURNS`): the attempt's work goes to `refs/wip/<ID>/<n>` (both repos),
   both worktrees are reset to green, `preview/work/` notes/CONTEXT/DECISIONS/PENDING are kept, a
   line goes into the notes, the next attempt starts. After attempt 3: `[!]`, BLOCKED.md.
 - NEEDS-EGOR: saved and reset the same way, `[!]`, the question in BLOCKED.md.
 - ENV (or `run.sh` exit 3): saved and reset, STOP.md, exit. Nothing fixes the environment at night.
-- No status (crash, timeout, usage limit, outage): saved and reset, not counted, wait (1, then
-  5/10/20/30 min; usage limits at least 5) and retry. Three non-limit interruptions of one task
-  count as one failed attempt; 20 in a row: STOP.
+- Usage limit: nothing is reset; after the wait (until the reset time it names, else 5/10/20/30 min)
+  the same session is resumed, not counted. A restart or a stop meanwhile saves its work under
+  `refs/wip/startup` / `refs/wip/stop` and notes it; the next session is fresh.
+- An answer without a status line: the session is resumed once and asked for it.
+- No status otherwise (crash, outage, a resume that fails): saved and reset, not counted, wait (1,
+  then 5/10/20/30 min) and retry. Three such interruptions of one task count as one failed attempt;
+  20 sessions in a row without an answer: STOP.
+- Budget: the estimated spend of a task (all its sessions) reaching `PREVIEW_TASK_BUDGET` USD: saved
+  and reset, `[!]`. Reopening it gives a fresh budget.
 
 ## Gates (`- [ ] GATE Pn`)
 1. A blocked task in the phase: STOP ("a phase never starts without the previous gate").
@@ -47,10 +55,12 @@ read-only roles get read-only tools, and nobody can start subagents. State lives
    ones go to PENDING.md. After the fixes (and green tests) round 2 reviews only the fixes. Its
    findings are fixed and tested but not reviewed again (noted in PENDING.md).
 4. Pass: `[x]`, commit, `git tag -a gate/Pn` (pinned), then `git -C ~/.config/nvim merge --ff-only
-   agent/preview` unless the branch changes a protected file or the merge fails: then a line in
-   BLOCKED.md and Egor merges.
+   agent/preview` unless the branch changes a protected file, `~/src/neovide-agent` has commits that
+   are not in `webview` (the config could need a Neovide not installed yet), or the merge fails: then
+   a line in BLOCKED.md and Egor merges.
 
 ## End
-All tasks `[x]`/`[!]`, `--until` reached (exit 0), or STOP.md (exit 2). PROGRESS.md always starts
+All tasks `[x]`/`[!]`, `--until` reached (exit 0), or STOP.md (exit 2; also when run.py itself
+crashes: the traceback is in STOP.md). PROGRESS.md always starts
 with a summary: done/blocked counts, gates, next task, why it stopped, estimated spend, what Egor
 has to look at.

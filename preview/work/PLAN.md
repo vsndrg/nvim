@@ -24,9 +24,9 @@ Protected after the gate, so it must survive P2's move and already serve P3a/P3b
 "Test harness" contract (layout, modes, exit codes incl. 3 = environment, phase table, output budget,
 adapter seam).
 - [ ] P1.1 `preview/test/run.sh` (`fast` / `env` / `gate <phase>`) + `adapter.lua`; fast tier = build + unit tests in `preview/test/unit/`.
-- [ ] P1.2 E2E driver in `preview/test/lib/` per the recipe in `mdpreview/CLAUDE.md` (isolated dev instance from `~/src/neovide-agent`, socket, window-only screenshot, postToPid keys); environment problems exit 3. The probe copied into `preview/test/probe/`, fixtures into `preview/test/fixtures/md/`. (needs P1.1)
+- [ ] P1.2 E2E driver in `preview/test/lib/` per the recipe in `mdpreview/CLAUDE.md` (isolated dev instance from `~/src/neovide-agent`, socket, window-only screenshot, postToPid keys); environment problems exit 3, including a display (resolution, backing scale) or macOS appearance that differs from the one recorded with the goldens (recorded next to them in P1.4; before that, `env` records nothing and skips this check). The probe copied into `preview/test/probe/`, fixtures into `preview/test/fixtures/md/`. (needs P1.1)
 - [ ] P1.3 `e2e/md/` scenarios: open, j/k/d/u/f/b/gg/G, find, links, file switch and back, `<C-b>`, theme switch, focus release. (needs P1.2)
-- [ ] P1.4 `golden/md/` from current HEAD; suite run 3x, `thresholds/md.json` set above the measured noise. (needs P1.3)
+- [ ] P1.4 `golden/md/` from current HEAD, with the display and appearance they were taken on recorded next to them; suite run 3x, `thresholds/md.json` set above the measured noise. (needs P1.3)
 - [ ] P1.5 `baseline.md`: bench + probe numbers. (needs P1.2)
 - [ ] GATE P1
 

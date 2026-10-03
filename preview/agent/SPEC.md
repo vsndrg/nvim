@@ -94,7 +94,9 @@ scenarios, goldens and the adapter after P3b.
 - `run.sh fast` = build + unit tests; `run.sh env` = the environment check alone;
   `run.sh gate <phase>` = env check + every suite the phase requires.
 - Exit codes: 0 green, 1 a test failed, 3 environment broken (dev instance doesn't start, screenshot
-  (near-)uniform/black, screen locked, missing tool). 3 is never a test failure: the run stops on it.
+  (near-)uniform/black, screen locked, missing tool, or the display (resolution, backing scale) or
+  macOS appearance differs from what the goldens were recorded with). 3 is never a test failure: the
+  run stops on it.
 - Output: the first failure only, at most 40 lines, plus the path of the full log in `test/out/`.
   A visual failure also writes a cropped, downscaled diff image to `test/out/` and prints its path.
 - Suites are discovered by directory `e2e/<type>/`. Per phase: `gate P1`, `gate P2` -> markdown;

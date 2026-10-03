@@ -26,7 +26,9 @@ That is all: it merges `main` itself (your spec/plan edits), waits out usage lim
 going until every task is done or blocked, or until it has to stop. Ctrl-C is safe: the next start
 saves what the interrupted session left (`refs/wip/startup`) and continues.
 Settings through the environment: `PREVIEW_MODEL` (default `opus`), `PREVIEW_EFFORT`,
-`PREVIEW_STEP_TIMEOUT` (seconds, default 3 h per session).
+`PREVIEW_STEP_TIMEOUT` (seconds, default 3 h per session), `PREVIEW_MAX_TURNS` (per session, default
+300, 0 = off), `PREVIEW_TASK_BUDGET` (estimated USD per task over all its sessions, default 50,
+0 = off; tune both from the `$` figures in `run.log`).
 
 ## Morning
 - `preview/work/PROGRESS.md` (summary on top), `BLOCKED.md`, `PENDING.md`, `DECISIONS.md`,
@@ -40,4 +42,5 @@ Settings through the environment: `PREVIEW_MODEL` (default `opus`), `PREVIEW_EFF
 - Gate tags are pinned in `$(git rev-parse --git-common-dir)/preview-agent-tags.json`: to move or
   delete a `gate/*` tag on purpose, delete that file too, or the next hook run restores the tag.
 - Neovide: merging `agent/preview` into `webview`, regenerating `mdpreview/neovide-webview.patch`
-  (later `preview/`), installing into `neovide-patched`: yours.
+  (later `preview/`), installing into `neovide-patched`: yours. Until then gate merges into `main`
+  are left to you too (BLOCKED.md says so).

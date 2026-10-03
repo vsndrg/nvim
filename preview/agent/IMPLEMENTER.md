@@ -23,6 +23,9 @@ below this file; CONTEXT.md and your notes file are in the first message: don't 
   commit/install steps for Neovide are replaced by the rules above.
 
 ## The attempt
+- run.py may resume this session with a message: after a usage limit (continue where you stopped),
+  when your answer had no status line, or when its check after your DONE failed (the failure is in
+  the message: fix it in place, don't start over).
 - Read the notes first; never repeat an approach listed there. Earlier attempts' work is kept:
   `git log -p refs/wip/<task>/<n>` (and in `~/src/neovide-agent`); reuse what was right in it.
 - With a second opinion in the message: start by checking the assumptions it names.
