@@ -53,8 +53,11 @@ class HookTest(unittest.TestCase):
             return "pass"
         return json.loads(r.stdout)["hookSpecificOutput"]["permissionDecision"]
 
-    def launch(self):
-        r = self.hook("guard.py", {"tool_name": "Agent", "cwd": str(self.root), "tool_input": {"prompt": "x"}})
+    def launch(self, **extra):
+        payload = {"tool_name": "Agent", "cwd": str(self.root), "tool_input": {"prompt": "x"}}
+        payload["tool_input"].update(extra.pop("tool_input", {}))
+        payload.update(extra)
+        r = self.hook("guard.py", payload)
         return "deny" if "deny" in r.stdout else "pass"
 
     def bash(self):
@@ -139,6 +142,24 @@ class HookTest(unittest.TestCase):
         plan = self.root / "preview/work/PLAN.md"
         plan.write_text(plan.read_text().replace("- [ ] first task", "- [!] first task"))
         self.assertEqual(self.launch(), "pass")
+
+    def test_helpers_and_nested_subagents_do_not_count(self):
+        for _ in range(10):
+            self.assertEqual(self.launch(agent_id="a1", agent_type="general-purpose"), "pass")
+            self.assertEqual(self.launch(tool_input={"subagent_type": "Explore"}), "pass")
+        for _ in range(5):
+            self.assertEqual(self.launch(tool_input={"subagent_type": "general-purpose"}), "pass")
+        self.assertEqual(self.launch(tool_input={"subagent_type": "general-purpose"}), "deny")
+
+    def test_ignored_artifacts_untouched(self):
+        sh(self.root, "git", "tag", "gate/P1")
+        (self.root / ".gitignore").write_text("preview/test/golden/md/*.actual.png\n")
+        sh(self.root, "git", "add", ".gitignore")
+        sh(self.root, "git", "commit", "-qm", "ignore")
+        actual = self.root / "preview/test/golden/md/a.actual.png"
+        actual.write_text("png")
+        self.assertEqual(self.bash().returncode, 0)
+        self.assertTrue(actual.exists())
 
     def test_no_open_task(self):
         (self.root / "preview/work/PLAN.md").write_text("- [x] all done\n")

@@ -47,6 +47,8 @@ why in PENDING.md and continue.
 - Never edit `~/.config/nvim` directly (only the merge above), never install Neovide into
   `~/.local/share/neovide-patched`, never push.
 - E2E: only the isolated dev instance from CLAUDE.md; never post global input events or capture the whole screen.
+- Test artifacts (actual screenshots, diffs, logs) go only to `preview/test/out/` (gitignored), never next to
+  goldens or scenarios.
 
 ## Tokens
 - One task per subagent; the main session keeps only summaries.

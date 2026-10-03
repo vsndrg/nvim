@@ -12,6 +12,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from policy import PLAN, active, covers, project_root, run, state_dir  # noqa: E402
 
 MAX_RUNS = 5  # 3 attempts + a second opinion + one spare
+NOT_ATTEMPTS = {"Explore", "claude-code-guide", "statusline-setup"}  # read-only helpers
 EDIT_TOOLS = {"Edit", "Write", "MultiEdit", "NotebookEdit"}
 AGENT_TOOLS = {"Agent", "Task"}
 OPEN_TASK = re.compile(r"^- \[ \] (.+)$", re.M)
@@ -44,6 +45,14 @@ def check_edit(root, data):
                  "explain why in preview/work/PENDING.md and move on.")
 
 
+def is_attempt(data):
+    """A task attempt is a subagent the main session starts; a subagent's own helpers and
+    read-only searches don't count."""
+    if data.get("agent_id"):
+        return False
+    return (data.get("tool_input") or {}).get("subagent_type") not in NOT_ATTEMPTS
+
+
 def count_run(root):
     plan = root / PLAN
     m = OPEN_TASK.search(plan.read_text()) if plan.exists() else None
@@ -67,7 +76,7 @@ def main(data):
     tool = data.get("tool_name")
     if tool in EDIT_TOOLS:
         check_edit(project_root(data), data)
-    elif tool in AGENT_TOOLS:
+    elif tool in AGENT_TOOLS and is_attempt(data):
         count_run(project_root(data))
 
 
