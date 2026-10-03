@@ -5,7 +5,8 @@ second provider. Adding a third file type must mean writing a provider, not touc
 
 Quality bar (non-negotiable):
 - No hacks, no copy-paste between providers, fix root causes. Prefer mature libraries over own code.
-- No regressions in markdown: behaviour, smoothness (see CLAUDE.md reference numbers), keys.
+- No regressions in markdown: behaviour, smoothness (reference numbers: `mdpreview/CLAUDE.md`, "Measuring
+  smoothness on screen"; after P2 in `preview/docs/`), keys.
 - Every decision that could reasonably go either way is written to `preview/work/DECISIONS.md` (one line: what, why, how to revert).
 
 ## Scope v1
@@ -26,9 +27,11 @@ The architecture must not prevent SyncTeX later (a provider-level `sync` hook).
 
 ## Architecture
 
-Neovide (`~/src/neovide`, branch `webview`) stays a generic host: `neovide.webview.*`.
+Neovide (branch `webview`) stays a generic host: `neovide.webview.*`.
 Nothing file-type-specific goes there. A Rust change is allowed only if the spike proves it
-necessary (see PLAN P0), must be generic, and follows the Neovide rules in CLAUDE.md.
+necessary (see PLAN P0), must be generic, and is made in the worktree `~/src/neovide-agent`, branch
+`agent/preview` off `webview` (rules: `IMPLEMENTER.md`, which overrides `mdpreview/CLAUDE.md`'s commit and
+install steps). Merging it into `webview`, regenerating `neovide-webview.patch` and installing are Egor's.
 
 Lua:
 - core: sessions, view window/buffer, modes, alternate-file handling, keyboard focus model,
@@ -45,8 +48,11 @@ Lua:
   - what "position" means for restore (markdown: line; PDF: page + offset in page + scale).
 - home: `~/.config/nvim/preview/` is the generic plugin (these docs live in `preview/agent/`).
   P2 moves `mdpreview/` into it: core, providers and web runtime/renderers under `preview/`;
-  `mdpreview/` is removed and the lazy spec in `lua/plugins/` points at `preview/`.
+  `mdpreview/` is removed and the lazy spec (`lua/plugins/mdpreview.lua`) points at `preview/`.
   `:MdPreview*` and current keymaps keep working (aliases); new generic commands `:Preview*`.
+  `mdpreview/CLAUDE.md` is split, nothing dropped: a short `preview/CLAUDE.md` (layout + where to read
+  more) and `preview/docs/` (Neovide API, protocol, keyboard model, build/test + E2E recipe, smoothness
+  probe + reference numbers, pitfalls), read on demand.
 
 File watching (core, `file` sources): `vim.uv` fs_event on the parent directory (tools write a temp
 file and rename), debounced. A truncated / half-written file must not crash or blank the view:
@@ -73,10 +79,30 @@ Web:
   restore page/offset/scale; on parse error keep the old document.
 - Page chrome (gap colour, scrollbar) follows the theme; page content is not recoloured.
 
+## Test harness (`preview/test/`)
+
+Fixed in P1 and protected after it, so it must already cover the later phases:
+- `run.sh fast` = build + unit tests; `run.sh env` = the environment check alone;
+  `run.sh gate <phase>` = env check + every suite the phase requires.
+- Exit codes: 0 green, 1 a test failed, 3 environment broken (dev instance doesn't start, screenshot
+  (near-)uniform/black, screen locked, missing tool). 3 is never a test failure: the run stops on it.
+- Output: the first failure only, at most 40 lines, plus the path of the full log in `test/out/`.
+  A visual failure also writes a cropped, downscaled diff image to `test/out/` and prints its path.
+- Suites are discovered by directory `e2e/<type>/`. Per phase: `gate P1`, `gate P2` -> markdown;
+  `gate P3a` -> markdown + `pdf` in validate mode (corpus present, references generate, every scenario
+  loads and reaches the adapter; assertions not run); `gate P3b`, `gate P4` and any later or unknown
+  phase -> everything in full. From P3b a skipped test is a failure.
+- Scenarios reach the plugin only through user commands/keys and the query functions of `adapter.lua`
+  (the one editable seam: which module to load from where, and how to read position, scale, find
+  result, selection). PDF scenarios are written in P3a against adapter functions that P3b implements.
+- Everything generated (actual screenshots, diffs, logs, LaTeX intermediates) goes to `test/out/`
+  (gitignored). Untracked files inside protected directories are deleted by a hook after every command.
+
 ## Acceptance criteria
 
-PDF corpus (`preview/test/pdf/`): text-heavy LaTeX (built from a `.tex` kept in the repo), scanned image,
-500+ pages, Cyrillic + CJK, rotated pages, internal links/outline, broken file, encrypted file.
+PDF corpus (`preview/test/pdf/`): text-heavy LaTeX (the `.tex` and the PDF built from it are both
+committed, so tests don't need TeX), scanned image, 500+ pages, Cyrillic + CJK, rotated pages,
+internal links/outline, broken file, encrypted file.
 Oracles: `pdftoppm` (render), `pdftotext` (text/find).
 
 Automated (the agent must make these pass; see WORKFLOW.md for gates):
@@ -86,7 +112,8 @@ Automated (the agent must make these pass; see WORKFLOW.md for gates):
 - PDF text: find counts and selected text match `pdftotext` for the corpus queries;
 - reload: atomic rename and in-place partial write -> no crash, no blank frame, position kept;
 - perf: keyboard scroll on PDF meets the markdown probe reference (0 stalls, <= 6 uneven > 1 px per
-  64 vsyncs); time to first page and memory on the 500+ page doc under thresholds fixed in P3;
+  64 vsyncs); time to first page and memory on the 500+ page doc under thresholds fixed in P3a from
+  the P0 measurement;
 - core contains no provider knowledge (grep check), no duplicated runtime code between renderers.
 
 Human (Egor, at the end): subjective smoothness and feel.

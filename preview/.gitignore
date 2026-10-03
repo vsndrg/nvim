@@ -1,1 +1,5 @@
 test/out/
+node_modules/
+dist/
+.build/
+*.dylib
