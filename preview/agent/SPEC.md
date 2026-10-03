@@ -81,7 +81,16 @@ Web:
 
 ## Test harness (`preview/test/`)
 
-Fixed in P1 and protected after it, so it must already cover the later phases:
+Fixed in P1 and protected after it, so it must already cover the later phases. Protection
+(details: `IMPLEMENTER.md`, enforced by hooks): after P1 everything under `preview/test/` except
+`unit/`, `adapter.lua` and the PDF parts; the PDF corpus and `thresholds/pdf.json` after P3a; the PDF
+scenarios, goldens and the adapter after P3b.
+- Layout: everything the harness runs lives under `preview/test/`: `run.sh`; shared drivers, image
+  diff and helpers in `lib/`; the smoothness probe in `probe/`; its own copies of the fixtures in
+  `fixtures/<type>/` (not the plugin's dev files: those move to `preview/dev/` in P2, outside
+  `preview/test/`); scenarios in `e2e/<type>/`; `golden/<type>/`; `thresholds/<type>.json`;
+  `baseline.md`; unit tests in `unit/` (stay editable). PDF-specific harness code lives in
+  `e2e/pdf/`. P2's move must not need any change under `preview/test/` except `adapter.lua`.
 - `run.sh fast` = build + unit tests; `run.sh env` = the environment check alone;
   `run.sh gate <phase>` = env check + every suite the phase requires.
 - Exit codes: 0 green, 1 a test failed, 3 environment broken (dev instance doesn't start, screenshot
@@ -95,6 +104,8 @@ Fixed in P1 and protected after it, so it must already cover the later phases:
 - Scenarios reach the plugin only through user commands/keys and the query functions of `adapter.lua`
   (the one editable seam: which module to load from where, and how to read position, scale, find
   result, selection). PDF scenarios are written in P3a against adapter functions that P3b implements.
+  In P3b a scenario may change only when it is wrong, never to let a weak implementation pass: each
+  change gets a `TEST CHANGE:` line in DECISIONS.md, and the gate review checks it.
 - Everything generated (actual screenshots, diffs, logs, LaTeX intermediates) goes to `test/out/`
   (gitignored). Untracked files inside protected directories are deleted by a hook after every command.
 

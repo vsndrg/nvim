@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""PreToolUse: refuse edits to protected files, shell commands that change Egor's live trees,
-pushes and tag moves, the gate merge while the branch carries a protected change, and a sixth
-subagent run on one task.
+"""PreToolUse: refuse edits to protected and orchestrator-owned files, shell commands that
+change Egor's live trees, git commands that rewrite shared refs, subagents, and any write
+in the read-only roles (review, opinion; PREVIEW_ROLE is set by run.py).
 
-The shell checks are best-effort pattern matching; restore.py is the backstop."""
+The shell checks are best-effort pattern matching; restore.py and run.py are the backstop."""
 from __future__ import annotations
 
 import json
@@ -14,31 +14,42 @@ from pathlib import Path
 
 sys.dont_write_bytecode = True  # no __pycache__ inside the protected directory
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from policy import BRANCH, PLAN, active, covers, git, load_state, project_root, run, save_state  # noqa: E402
+from policy import OWNED, active, covers, project_root, run  # noqa: E402
 
-MAX_RUNS = 5  # 2 attempts + a second opinion + attempt 3 + one spare
-RUNS = "preview-agent-runs.json"
-NOT_ATTEMPTS = {"Explore", "claude-code-guide", "statusline-setup"}  # read-only helpers
 EDIT_TOOLS = {"Edit", "Write", "MultiEdit", "NotebookEdit"}
-AGENT_TOOLS = {"Agent", "Task"}
-OPEN_TASK = re.compile(r"^- \[ \] (.+)$", re.M)
+AGENT_TOOLS = {"Agent", "Task", "Workflow"}
+READ_ONLY_ROLES = {"review", "opinion"}
 
 # Egor's trees: the live config, the Neovide he builds from, the installed Neovide.
 # The agent works in its worktrees (~/src/preview-agent, ~/src/neovide-agent) and may only read these.
 LIVE = re.compile(r"\.config/nvim(?![\w.-])|src/neovide(?![\w.-])|neovide-patched")
-MERGE = f"git -C ~/.config/nvim merge --ff-only {BRANCH}"
 READ_CMDS = {"cat", "head", "tail", "less", "ls", "grep", "rg", "find", "wc", "diff", "stat", "file",
              "du", "echo", "printf", "sed", "awk", "sort", "uniq", "cut", "tr", "jq", "test", "[",
-             "true", "realpath", "readlink", "git"}
+             "true", "realpath", "readlink", "git", "cd", "pwd", "nl", "basename", "dirname"}
 READ_GIT = {"log", "status", "diff", "show", "rev-parse", "ls-files", "ls-tree", "merge-base",
             "cat-file", "describe", "rev-list", "blame", "grep", "for-each-ref", "shortlog"}
 SEGMENT = re.compile(r"\|\|?|&&|;|\n|\$\(|`|[()]")
-GIT_SUB = re.compile(r"^git((?:\s+-[Cc]\s+\S+|\s+--?[\w-]+(?:=\S+)?)*)\s+([\w-]+)")
+GIT_SUB = re.compile(r"^git((?:\s+-[Cc]\s+\S+|\s+--?[\w-]+(?:=\S+)?)*)\s+([\w-]+)(.*)$", re.S)
 SINKS = re.compile(r"\d*>>?\s*/dev/null|\d*>&\d")
-ONE = r"[^\n;&|]*"
-PUSH = re.compile(rf"\bgit\b{ONE}\spush\b")
-TAG_MOVE = re.compile(rf"\bgit\b{ONE}\stag\b{ONE}\s(-\w*[df]\w*|--delete|--force)\b")
-UPDATE_REF = re.compile(rf"\bgit\b{ONE}\supdate-ref\b")
+WRITE_OPTS = re.compile(r"\s--output(=|\s)|\s--ext-diff\b|\s-O\S*|\s--open-files-in-pager")
+
+# git subcommands that change shared refs or config (the worktrees share them with Egor's
+# repos): only run.py tags, merges into main and saves attempts.
+TAG_READ = {"-l", "--list", "-n", "--contains", "--no-contains", "--points-at", "--merged",
+            "--no-merged", "--sort", "--format", "--column", "--no-column", "-v", "--verify"}
+BRANCH_WRITE = re.compile(r"\s(-[a-zA-Z]*[dDmMcCf][a-zA-Z]*|--delete|--move|--copy|--force|"
+                          r"--set-upstream-to\S*|-u|--unset-upstream|--edit-description)\b")
+GIT_DENY = {
+    "push": "Never push.",
+    "update-ref": "Refs are never rewritten by hand.",
+    "symbolic-ref": "Refs are never rewritten by hand.",
+    "gc": "No gc/prune/reflog expiry: earlier attempts are kept in refs/wip/.",
+    "prune": "No gc/prune/reflog expiry: earlier attempts are kept in refs/wip/.",
+    "filter-branch": "History is never rewritten.",
+    "filter-repo": "History is never rewritten.",
+    "replace": "History is never rewritten.",
+    "remote": "Remotes belong to Egor.",
+}
 
 
 def deny(reason):
@@ -50,7 +61,13 @@ def deny(reason):
     sys.exit(0)
 
 
+def role():
+    return os.environ.get("PREVIEW_ROLE", "")
+
+
 def check_edit(root, data):
+    if role() in READ_ONLY_ROLES:
+        deny("This session is read-only: don't edit anything, report in your answer.")
     args = data.get("tool_input") or {}
     raw = args.get("file_path") or args.get("notebook_path")
     if not raw:
@@ -62,83 +79,86 @@ def check_edit(root, data):
         rel = path.resolve().relative_to(root).as_posix()
     except ValueError:
         return  # outside the worktree: the settings.json rules apply
-    for _, label, paths in active(root):
-        if covers(paths, rel):
+    if rel in OWNED:
+        deny(f"{rel} is written by the orchestrator (run.py) only. Report through your answer, "
+             "notes, CONTEXT.md, DECISIONS.md or PENDING.md.")
+    for _, label, include, exclude in active(root):
+        if covers(include, exclude, rel):
             deny(f"{rel} is protected ({label}). Don't change it; if it is wrong, "
                  "explain why in preview/work/PENDING.md and move on.")
+
+
+def segments(cmd):
+    for seg in SEGMENT.split(cmd):
+        words = seg.split()
+        while words and re.match(r"^\w+=", words[0]):
+            words.pop(0)
+        if words:
+            yield words
 
 
 def may_write(cmd):
     """True unless every part of the command is a known read-only one."""
     if ">" in SINKS.sub("", cmd):
         return True
-    for seg in SEGMENT.split(cmd):
-        words = seg.split()
-        while words and re.match(r"^\w+=", words[0]):
-            words.pop(0)
-        if not words:
-            continue
+    for words in segments(cmd):
         head, rest = os.path.basename(words[0]), " ".join(words)
         if head not in READ_CMDS:
             return True
         if head == "sed" and re.search(r"\s-\w*i", rest):
             return True
-        if head == "find" and re.search(r"\s-(delete|exec|execdir|ok|okdir|fprint\w*)\b", rest):
+        if head == "find" and re.search(r"\s-(delete|exec|execdir|ok|okdir|fprint\w*|fls)\b", rest):
+            return True
+        if head == "awk" and re.search(r"system\s*\(|\|\s*\"|print\s*>", rest):
             return True
         if head == "git":
             m = GIT_SUB.match(rest)
-            if not m or m.group(2) not in READ_GIT:
+            if not m or m.group(2) not in READ_GIT or WRITE_OPTS.search(m.group(3)):
                 return True
     return False
 
 
-def check_merge(root):
-    bad = []
-    for commit, label, paths in active(root, BRANCH):
-        bad += [f"{p} ({label})" for p in
-                git(root, "diff", "--name-only", commit, BRANCH, "--", *paths).splitlines()]
-    if bad:
-        deny(f"{BRANCH} carries changes to protected files, so it can't be merged into main:\n  " +
-             "\n  ".join(bad) + "\nRevert them in a commit, then merge. If one is needed, explain "
-             "why in preview/work/PENDING.md and leave the merge to Egor (BLOCKED.md).")
+def git_danger(cmd):
+    """Reason to refuse a git command that changes shared refs/config, or None."""
+    for words in segments(cmd):
+        if os.path.basename(words[0]) != "git":
+            continue
+        m = GIT_SUB.match(" ".join(words))
+        if not m:
+            continue
+        sub, rest = m.group(2), m.group(3)
+        args = rest.split()
+        if sub in GIT_DENY:
+            return GIT_DENY[sub]
+        if sub == "tag" and args and args[0] not in TAG_READ:
+            return "Only run.py creates, moves or deletes tags (gate tags are its record)."
+        if sub == "branch" and BRANCH_WRITE.search(" " + rest):
+            return "Branches are never deleted, moved, copied or forced; stay on agent/preview."
+        if sub == "worktree" and (not args or args[0] != "list"):
+            return "The worktrees are fixed: don't add, move or remove them."
+        if sub == "config" and not (args and args[0] in {"--get", "--get-all", "--get-regexp", "-l", "--list"}):
+            return "git config is shared with Egor's repo: read it only (--get/--list)."
+        if sub == "reflog" and args and args[0] in {"expire", "delete"}:
+            return "No gc/prune/reflog expiry: earlier attempts are kept in refs/wip/."
+        if sub in {"checkout", "switch"} and re.search(r"(^|\s)(main|webview)(\s|$)", rest) \
+                and " -- " not in f" {rest} ":
+            return "Stay on agent/preview: main and webview are Egor's checkouts."
+    return None
 
 
-def check_bash(root, data):
+def check_bash(data):
     cmd = (data.get("tool_input") or {}).get("command") or ""
-    if " ".join(cmd.split()) == MERGE:
-        check_merge(root)
-        return
+    if role() in READ_ONLY_ROLES and may_write(cmd):
+        deny("This session is read-only: only read commands (cat/grep/ls/git log|show|diff ...), "
+             "no redirects, no builds.")
     if LIVE.search(cmd) and may_write(cmd):
         deny("This command may change Egor's trees (~/.config/nvim, ~/src/neovide, neovide-patched). "
              "Work in ~/src/preview-agent and ~/src/neovide-agent; the same git history is visible "
-             f"there. Commands naming those paths must be read-only (cat/grep/ls/git log|show|diff...), "
-             f"with no redirect. The one exception is `{MERGE}`, run on its own.")
-    if PUSH.search(cmd):
-        deny("Never push.")
-    if TAG_MOVE.search(cmd) or UPDATE_REF.search(cmd):
-        deny("Tags and refs are never deleted, moved or rewritten; create a tag only at a gate.")
-
-
-def is_attempt(data):
-    """A task attempt is a subagent the main session starts; read-only helpers don't count."""
-    if data.get("agent_id"):
-        return False
-    return (data.get("tool_input") or {}).get("subagent_type") not in NOT_ATTEMPTS
-
-
-def count_run(root):
-    plan = root / PLAN
-    m = OPEN_TASK.search(plan.read_text()) if plan.exists() else None
-    if not m:
-        return
-    task = " ".join(m.group(1).split())
-    runs = load_state(root, RUNS)
-    runs[task] = runs.get(task, 0) + 1
-    save_state(root, RUNS, runs)
-    if runs[task] > MAX_RUNS:
-        deny(f"Task '{task}' already had {MAX_RUNS} subagent runs. Stop working on it: mark it "
-             f"'- [!]' in {PLAN}, add the reason and its notes file to preview/work/BLOCKED.md, "
-             "and go on with the next task (a GATE: write preview/work/STOP.md and stop).")
+             "there. Commands naming those paths must be read-only (cat/grep/ls/git log|show|diff...), "
+             "with no redirect.")
+    reason = git_danger(cmd)
+    if reason:
+        deny(reason)
 
 
 def main(data):
@@ -146,9 +166,10 @@ def main(data):
     if tool in EDIT_TOOLS:
         check_edit(project_root(data), data)
     elif tool == "Bash":
-        check_bash(project_root(data), data)
-    elif tool in AGENT_TOOLS and is_attempt(data):
-        count_run(project_root(data))
+        check_bash(data)
+    elif tool in AGENT_TOOLS:
+        deny("No subagents or workflows: this session is the one worker for its step. "
+             "Do the work yourself, keep the context lean (grep, read by range).")
 
 
 run(main)

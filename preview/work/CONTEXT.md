@@ -1,6 +1,6 @@
 # Context
 
-Shared by subagents: what the next one would otherwise re-discover. At most 150 lines; keep it current
+Shared by the sessions run.py starts: what the next one would otherwise re-discover. At most 150 lines; keep it current
 (replace and condense, drop what is obsolete). Permanent facts move to preview/CLAUDE.md / docs in P2.
 
 ## Where things are

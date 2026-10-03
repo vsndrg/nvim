@@ -13,6 +13,12 @@ FILES = {
     "preview/agent/SPEC.md": "spec\n",
     "preview/test/golden/md/a.txt": "golden\n",
     "preview/test/adapter.lua": "return {}\n",
+    "preview/test/run.sh": "exit 0\n",
+    "preview/test/lib/diff.py": "THRESH = 1\n",
+    "preview/test/unit/a_test.lua": "-- unit\n",
+    "preview/test/e2e/pdf/scroll.lua": "-- scenario\n",
+    "preview/test/pdf/a.tex": "tex\n",
+    "preview/test/thresholds/pdf.json": "{}\n",
     "preview/work/PLAN.md": "- [x] done\n- [ ] first task\n- [ ] second task\n",
     "src.txt": "code\n",
 }
@@ -39,26 +45,19 @@ class HookTest(unittest.TestCase):
     def tearDown(self):
         self.tmp.cleanup()
 
-    def hook(self, name, payload):
-        env = dict(os.environ, CLAUDE_PROJECT_DIR=str(self.root), TMPDIR=self.tmp.name)
+    def hook(self, name, payload, role="implement"):
+        env = dict(os.environ, CLAUDE_PROJECT_DIR=str(self.root), TMPDIR=self.tmp.name, PREVIEW_ROLE=role)
         text = payload if isinstance(payload, str) else json.dumps(payload)
         return subprocess.run([sys.executable, str(HOOKS / name)], input=text,
                               capture_output=True, text=True, env=env)
 
-    def edit(self, file_path, tool="Edit", cwd=None):
+    def edit(self, file_path, tool="Edit", cwd=None, role="implement"):
         r = self.hook("guard.py", {"tool_name": tool, "cwd": str(cwd or self.root),
-                                   "tool_input": {"file_path": str(file_path)}})
+                                   "tool_input": {"file_path": str(file_path)}}, role)
         self.assertEqual(r.returncode, 0, r.stderr)
         if not r.stdout.strip():
             return "pass"
         return json.loads(r.stdout)["hookSpecificOutput"]["permissionDecision"]
-
-    def launch(self, **extra):
-        payload = {"tool_name": "Agent", "cwd": str(self.root), "tool_input": {"prompt": "x"}}
-        payload["tool_input"].update(extra.pop("tool_input", {}))
-        payload.update(extra)
-        r = self.hook("guard.py", payload)
-        return "deny" if "deny" in r.stdout else "pass"
 
     def bash(self):
         return self.hook("restore.py", {"tool_name": "Bash", "cwd": str(self.root),
@@ -134,23 +133,6 @@ class HookTest(unittest.TestCase):
         self.assertEqual((self.root / "src.txt").read_text(), "changed\n")
         self.assertEqual((self.root / "preview/test/golden/md/a.txt").read_text(), "new golden\n")
 
-    def test_run_limit_per_task(self):
-        for _ in range(5):
-            self.assertEqual(self.launch(), "pass")
-        self.assertEqual(self.launch(), "deny")
-        self.assertEqual(self.launch(), "deny")
-        plan = self.root / "preview/work/PLAN.md"
-        plan.write_text(plan.read_text().replace("- [ ] first task", "- [!] first task"))
-        self.assertEqual(self.launch(), "pass")
-
-    def test_helpers_and_nested_subagents_do_not_count(self):
-        for _ in range(10):
-            self.assertEqual(self.launch(agent_id="a1", agent_type="general-purpose"), "pass")
-            self.assertEqual(self.launch(tool_input={"subagent_type": "Explore"}), "pass")
-        for _ in range(5):
-            self.assertEqual(self.launch(tool_input={"subagent_type": "general-purpose"}), "pass")
-        self.assertEqual(self.launch(tool_input={"subagent_type": "general-purpose"}), "deny")
-
     def test_ignored_artifacts_untouched(self):
         sh(self.root, "git", "tag", "gate/P1")
         (self.root / ".gitignore").write_text("preview/test/golden/md/*.actual.png\n")
@@ -160,11 +142,6 @@ class HookTest(unittest.TestCase):
         actual.write_text("png")
         self.assertEqual(self.bash().returncode, 0)
         self.assertTrue(actual.exists())
-
-    def test_no_open_task(self):
-        (self.root / "preview/work/PLAN.md").write_text("- [x] all done\n")
-        for _ in range(7):
-            self.assertEqual(self.launch(), "pass")
 
     def test_fail_open(self):
         for name, text in (("guard.py", "not json"), ("restore.py", "{")):
@@ -188,9 +165,9 @@ class HookTest(unittest.TestCase):
 
     # --- shell guard -------------------------------------------------------------------------
 
-    def cmd(self, command):
+    def cmd(self, command, role="implement"):
         r = self.hook("guard.py", {"tool_name": "Bash", "cwd": str(self.root),
-                                   "tool_input": {"command": command}})
+                                   "tool_input": {"command": command}}, role)
         self.assertEqual(r.returncode, 0, r.stderr)
         return "deny" if '"deny"' in r.stdout else "pass"
 
@@ -212,23 +189,82 @@ class HookTest(unittest.TestCase):
         for c in ("git push", "git -c x=y push origin main", "git tag -a -f gate/P1", "git tag -d gate/P1",
                   "git -C . tag --delete gate/P1", "git update-ref refs/tags/gate/P1 HEAD"):
             self.assertEqual(self.cmd(c), "deny", c)
-        for c in ("git tag gate/P1", "git tag -a -m 'gate P1' gate/P1", "git tag -l 'gate/*'"):
+        for c in ("git tag gate/P1", "git tag -a -m 'gate P1' gate/P1"):
+            self.assertEqual(self.cmd(c), "deny", c)
+        for c in ("git tag", "git tag -l 'gate/*'", "git tag --points-at HEAD"):
             self.assertEqual(self.cmd(c), "pass", c)
 
-    def test_gate_merge_refused_while_branch_changes_protected(self):
-        merge = "git -C ~/.config/nvim merge --ff-only agent/preview"
-        self.assertEqual(self.cmd(merge), "pass")
-        spec = self.root / "preview/agent/SPEC.md"
-        spec.write_text("weaker\n")
-        sh(self.root, "git", "commit", "-qam", "launder")
-        self.assertEqual(self.cmd(merge), "deny")
-        spec.write_text("spec\n")
-        sh(self.root, "git", "commit", "-qam", "revert")
-        self.assertEqual(self.cmd(merge), "pass")
+    # --- harness, owned files, roles, shared refs --------------------------------------------
+
+    def test_harness_protected_after_p1_with_exceptions(self):
+        r = self.root / "preview/test"
+        for p in ("run.sh", "lib/diff.py", "e2e/md/new.lua", "fixtures/md/k.md"):
+            self.assertEqual(self.edit(r / p, tool="Write"), "pass", p)
         sh(self.root, "git", "tag", "gate/P1")
-        (self.root / "preview/test/golden/md/a.txt").write_text("loosened\n")
-        sh(self.root, "git", "commit", "-qam", "cheat")
-        self.assertEqual(self.cmd(merge), "deny")
+        for p in ("run.sh", "lib/diff.py", "e2e/md/new.lua", "fixtures/md/k.md", "probe/probe.m"):
+            self.assertEqual(self.edit(r / p, tool="Write"), "deny", p)
+        for p in ("unit/a_test.lua", "unit/new_test.lua", "adapter.lua", "e2e/pdf/scroll.lua",
+                  "pdf/a.tex", "thresholds/pdf.json", "golden/pdf/p1.png"):
+            self.assertEqual(self.edit(r / p, tool="Write"), "pass", p)
+
+    def test_pdf_tests_staged(self):
+        r = self.root / "preview/test"
+        sh(self.root, "git", "tag", "gate/P1")
+        sh(self.root, "git", "tag", "gate/P3a")
+        self.assertEqual(self.edit(r / "pdf/a.tex"), "deny")
+        self.assertEqual(self.edit(r / "thresholds/pdf.json"), "deny")
+        self.assertEqual(self.edit(r / "e2e/pdf/scroll.lua"), "pass")
+        sh(self.root, "git", "tag", "gate/P3b")
+        self.assertEqual(self.edit(r / "e2e/pdf/scroll.lua"), "deny")
+        self.assertEqual(self.edit(r / "unit/a_test.lua"), "pass")
+
+    def test_restore_respects_exceptions(self):
+        sh(self.root, "git", "tag", "gate/P1")
+        (self.root / "preview/test/lib/diff.py").write_text("THRESH = 99\n")
+        (self.root / "preview/test/unit/a_test.lua").write_text("-- changed\n")
+        (self.root / "preview/test/unit/b_test.lua").write_text("-- new\n")
+        (self.root / "preview/test/lib/extra.py").write_text("x\n")
+        r = self.bash()
+        self.assertEqual(r.returncode, 2)
+        self.assertEqual((self.root / "preview/test/lib/diff.py").read_text(), "THRESH = 1\n")
+        self.assertFalse((self.root / "preview/test/lib/extra.py").exists())
+        self.assertEqual((self.root / "preview/test/unit/a_test.lua").read_text(), "-- changed\n")
+        self.assertTrue((self.root / "preview/test/unit/b_test.lua").exists())
+
+    def test_owned_files_refused(self):
+        for p in ("PLAN.md", "PROGRESS.md", "BLOCKED.md", "STOP.md"):
+            self.assertEqual(self.edit(self.root / "preview/work" / p), "deny", p)
+        for p in ("CONTEXT.md", "DECISIONS.md", "PENDING.md", "notes/P0.1.md"):
+            self.assertEqual(self.edit(self.root / "preview/work" / p, tool="Write"), "pass", p)
+
+    def test_read_only_roles(self):
+        for role in ("review", "opinion"):
+            self.assertEqual(self.edit(self.root / "src.txt", role=role), "deny")
+            for c in ("git diff -M --stat a..b", "cd preview && git log --oneline -3", "grep -rn x preview | head",
+                      "sed -n 1,20p src.txt", "git show HEAD:src.txt | wc -l"):
+                self.assertEqual(self.cmd(c, role=role), "pass", c)
+            for c in ("touch x", "echo x > src.txt", "sed -i '' s/a/b/ src.txt", "git commit -qam x",
+                      "npm test", "git diff --output=/tmp/x", "awk 'BEGIN{system(\"rm x\")}'"):
+                self.assertEqual(self.cmd(c, role=role), "deny", c)
+        self.assertEqual(self.cmd("touch x"), "pass")
+
+    def test_subagents_refused(self):
+        for tool in ("Agent", "Task", "Workflow"):
+            r = self.hook("guard.py", {"tool_name": tool, "cwd": str(self.root), "tool_input": {"prompt": "x"}})
+            self.assertIn('"deny"', r.stdout, tool)
+
+    def test_shared_refs_and_config(self):
+        for c in ("git branch -D main", "git branch -f webview HEAD", "git branch -m agent/preview x",
+                  "git worktree remove ~/src/neovide-agent", "git worktree add ../x", "git config user.name x",
+                  "git gc --prune=now", "git reflog expire --all", "git checkout main", "git switch webview",
+                  "git -C ~/src/neovide-agent update-ref refs/heads/webview HEAD", "git remote add x y",
+                  "git symbolic-ref HEAD refs/heads/main"):
+            self.assertEqual(self.cmd(c), "deny", c)
+        for c in ("git branch", "git branch -a -v", "git branch --show-current", "git branch spike-x",
+                  "git worktree list", "git config --get user.name", "git checkout main -- src.txt",
+                  "git checkout -- src.txt", "git reset --hard HEAD~1", "git stash", "git commit -qam 'x'",
+                  "git log refs/wip/P0.1/1 --stat", "git -C ~/src/neovide-agent commit -qam 'feat: x'"):
+            self.assertEqual(self.cmd(c), "pass", c)
 
     # --- tag pins ----------------------------------------------------------------------------
 
@@ -266,21 +302,6 @@ class HookTest(unittest.TestCase):
         self.assertEqual(self.edit(adapter), "pass")
         sh(self.root, "git", "tag", "gate/P3b")
         self.assertEqual(self.edit(adapter), "deny")
-
-    # --- attempt counter ---------------------------------------------------------------------
-
-    def test_run_count_kept_per_task(self):
-        plan = self.root / "preview/work/PLAN.md"
-        text = plan.read_text()
-        for _ in range(3):
-            self.assertEqual(self.launch(), "pass")
-        plan.write_text(text.replace("- [ ] first task", "- [x] first task"))
-        for _ in range(5):
-            self.assertEqual(self.launch(), "pass")
-        plan.write_text(text.replace("- [ ] first task", "- [ ]   first   task"))  # whitespace only
-        for _ in range(2):
-            self.assertEqual(self.launch(), "pass")
-        self.assertEqual(self.launch(), "deny")
 
     def test_failures_logged_in_test_out(self):
         self.hook("guard.py", "not json")

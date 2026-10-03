@@ -1,56 +1,56 @@
-# Workflow: the main session (orchestrator)
+# Workflow: what run.py does
 
-You dispatch and record. You don't read code, diffs, logs, notes or screenshots, and you don't need
-SPEC.md: subagents work by `IMPLEMENTER.md`, reviewers by `REVIEW.md`. Nobody answers questions during
-the run. State lives in `preview/work/`: PLAN.md, PROGRESS.md, DECISIONS.md, BLOCKED.md, PENDING.md,
-CONTEXT.md, `notes/<slug>.md` (slug = the task text, lowercased, non-alphanumerics -> `-`, max 50 chars),
-STOP.md.
+The orchestrator is `preview/agent/run.py`, plain code. Claude only works inside steps, one fresh
+`claude -p` session per step (no long-lived context, no compaction): implement a task
+(`IMPLEMENTER.md`), give a second opinion (`OPINION.md`), review a gate (`REVIEW.md`). Each gets
+its instructions plus SPEC.md as the system prompt (the same text every time, so it is cached),
+read-only roles get read-only tools, and nobody can start subagents. State lives in
+`preview/work/` (git) and `$(git rev-parse --git-common-dir)/preview-agent-state.json`.
 
-## Task loop
-1. Take the first `- [ ]` line in PLAN.md. Never edit the text of an open line: the attempt counter
-   (a hook) is keyed by it.
-2. Start one subagent with exactly this prompt: paths only, never paste file contents.
+## Start
+1. Refuse to start while `preview/work/STOP.md` exists, Claude Code is older than 2.1.259, the
+   hook tests fail or `preview/test/out/hooks.log` is not empty.
+2. Commit Egor's edits under `preview/work/` (unblocked tasks, answers in notes). Save anything
+   else an interrupted run left under `refs/wip/startup` and reset both worktrees to HEAD.
+3. `git merge main` (Egor's spec/plan edits). A conflict refuses to start.
+4. Snapshot Egor's trees (`~/.config/nvim`, `~/src/neovide`: HEAD, status, diff;
+   `neovide-patched`: file list with sizes and mtimes).
+5. Self-check: one tiny `claude -p` with the real flags must run a shell command and answer.
+6. Once `run.sh` exists: `run.sh env` must be 0; a red `run.sh fast` inserts a fix task `X.F<n>`
+   before the first open task.
 
-       Read preview/agent/IMPLEMENTER.md and follow it.
-       Task: <the task line>
-       Notes: preview/work/notes/<slug>.md
-       Attempt: <n>
-       <attempt 3 only: "Second opinion: <its answer>">
-
-3. It returns at most 10 lines starting with DONE, FAILED, ENV or NEEDS-EGOR.
-4. DONE: once `preview/test/run.sh` exists, run `preview/test/run.sh fast >/dev/null 2>&1; echo $?`
-   yourself. 0 -> tick `- [x]` (keep the text), one line in PROGRESS.md, commit. Otherwise treat it as
-   FAILED and say so in the next attempt's prompt.
-5. FAILED: next attempt. Before attempt 3, start a read-only second-opinion subagent:
-   "Read preview/work/notes/<slug>.md and the code it names. Don't edit anything. In at most 10 lines: the
-   most likely root cause, and which assumptions all attempts shared that may be wrong."
-   Pass its answer into attempt 3. (Subagents can't start subagents; this is yours.)
-6. Attempt 3 failed, or the hook refused a launch: `- [!]`, BLOCKED.md gets the reason and the notes
-   path, move on. Later tasks of the same phase that need its result: `- [!]` "depends on <task>".
-7. NEEDS-EGOR: the exact question in BLOCKED.md, `- [!]`, move on. A `[!]` always has either three
-   attempts in its notes or a question for Egor.
-8. ENV: write STOP.md (the subagent's lines, the task) and stop. Don't retry: nothing fixes the
-   environment at night, and every retry burns a run.
-9. Decisions that could go either way are the subagents' (DECISIONS.md); don't deliberate.
+## Task loop (the first open line of PLAN.md)
+- A task whose `(needs ...)` is blocked: `[!]` "depends on", next.
+- Attempt n of 3; before attempt 3 a read-only second opinion, passed into attempt 3. The prompt
+  carries the task, the attempt, the base commits, CONTEXT.md and the notes file inline.
+- After every session and every `run.sh` call: Egor's trees must match the snapshot (else STOP),
+  the hook log must be empty (else STOP).
+- DONE: both worktrees on `agent/preview`, history before the attempt intact, nothing left
+  uncommitted in `~/src/neovide-agent`, then `run.sh fast` and (after GATE P1) `run.sh gate <last
+  passed gate>` green. Then: run.py's own files restored, `[x]`, a PROGRESS line, one commit of
+  everything (that commit is the new "green" base).
+- FAILED, or DONE whose check failed: the attempt's work goes to `refs/wip/<ID>/<n>` (both repos),
+  both worktrees are reset to green, `preview/work/` notes/CONTEXT/DECISIONS/PENDING are kept, a
+  line goes into the notes, the next attempt starts. After attempt 3: `[!]`, BLOCKED.md.
+- NEEDS-EGOR: saved and reset the same way, `[!]`, the question in BLOCKED.md.
+- ENV (or `run.sh` exit 3): saved and reset, STOP.md, exit. Nothing fixes the environment at night.
+- No status (crash, timeout, usage limit, outage): saved and reset, not counted, wait (1, then
+  5/10/20/30 min; usage limits at least 5) and retry. Three non-limit interruptions of one task
+  count as one failed attempt; 20 in a row: STOP.
 
 ## Gates (`- [ ] GATE Pn`)
-1. Check: `preview/test/run.sh gate Pn >/dev/null 2>&1; echo $?`. 0 -> step 2; 1 -> the failure becomes
-   a task inserted before the gate (`- [ ] Fix gate Pn: run preview/test/run.sh gate Pn`); 3 -> STOP.md.
-   Before run.sh exists (P0): a subagent (the task-loop prompt, task "GATE P0: check") confirms the
-   build passes and the phase's deliverables exist.
-2. Review: a fresh subagent with "Read preview/agent/REVIEW.md and follow it. Range: <base>..HEAD",
-   base = the previous `gate/*` tag, or `$(git merge-base main HEAD)` for P0. Each finding line it
-   returns is inserted as a `- [ ]` task before the gate; the gate is checked again after them.
-   `NO FINDINGS` -> step 3.
-3. Tick the gate, commit everything (the tag is the baseline protected files are measured from),
-   `git tag gate/Pn`, then run exactly this, as a command on its own (pre-approved):
-   `git -C ~/.config/nvim merge --ff-only agent/preview`. If it fails or a hook refuses it, put the
-   message in BLOCKED.md and continue; Egor merges.
-4. A gate that can't go green (blocked by the run cap or a blocked task it needs): STOP.md
-   "GATE Pn blocked: <why>" and stop. Never start a phase without the previous gate: its tests are what
-   protects the next one.
+1. A blocked task in the phase: STOP ("a phase never starts without the previous gate").
+2. Tests: `run.sh gate Pn`. 3: STOP. Red: a fix task `Pn.F<k>` before the gate (with the failure
+   in its notes), at most 3 per gate, then STOP. Before run.sh exists (P0): a check task `Pn.C1`.
+3. Review round 1 (read-only session, range = previous gate tag..HEAD in both repos). BLOCKING
+   findings become tasks `Pn.R<k>` before the gate (at most 6, the rest batched into one), MINOR
+   ones go to PENDING.md. After the fixes (and green tests) round 2 reviews only the fixes. Its
+   findings are fixed and tested but not reviewed again (noted in PENDING.md).
+4. Pass: `[x]`, commit, `git tag -a gate/Pn` (pinned), then `git -C ~/.config/nvim merge --ff-only
+   agent/preview` unless the branch changes a protected file or the merge fails: then a line in
+   BLOCKED.md and Egor merges.
 
-## Done
-Every task is `[x]` or `[!]`, or STOP.md exists. Write a summary at the top of PROGRESS.md: what is
-done, what is blocked and why, why the run stopped (if it did), what Egor has to check (subjective
-smoothness, PENDING.md, BLOCKED.md, any merge left to him, the Neovide branch to merge into `webview`).
+## End
+All tasks `[x]`/`[!]`, `--until` reached (exit 0), or STOP.md (exit 2). PROGRESS.md always starts
+with a summary: done/blocked counts, gates, next task, why it stopped, estimated spend, what Egor
+has to look at.

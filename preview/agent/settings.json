@@ -1,15 +1,8 @@
 {
   "permissions": {
-    "allow": [
-      "Bash(git -C ~/.config/nvim merge --ff-only agent/preview)"
-    ],
     "deny": [
       "Bash(git push)",
       "Bash(git push *)",
-      "Bash(git tag -d *)",
-      "Bash(git tag --delete *)",
-      "Bash(git tag -f *)",
-      "Bash(git tag --force *)",
       "Bash(git update-ref *)",
       "Bash(sudo *)",
       "Edit(~/.config/nvim/**)",
@@ -20,7 +13,7 @@
   "hooks": {
     "PreToolUse": [
       {
-        "matcher": "Edit|Write|MultiEdit|NotebookEdit|Agent|Task|Bash",
+        "matcher": "Edit|Write|MultiEdit|NotebookEdit|Agent|Task|Workflow|Bash",
         "hooks": [
           {
             "type": "command",

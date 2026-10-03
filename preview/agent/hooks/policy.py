@@ -1,8 +1,8 @@
-"""Shared policy for the agent hooks: what is protected, and since when.
+"""Shared policy for the agent hooks and run.py: what is protected, and since when.
 
 Hooks fail open: an unexpected error is logged (preview/test/out/hooks.log) and the
 tool call goes ahead, so a bug here can weaken a check but never stops the run.
-The log is on the morning checklist: anything in it means a check was skipped."""
+run.py stops the run when that log is not empty (before every gate and at start)."""
 from __future__ import annotations
 
 import json
@@ -14,31 +14,29 @@ from pathlib import Path
 
 PLAN = "preview/work/PLAN.md"
 BRANCH = "agent/preview"
-
-# Baseline -> protected paths ("dir/" covers everything under it). A tag baseline
-# applies once the tag exists; "@base" (merge-base of main and the branch) applies always.
-# main only moves through Egor or the gate merge, and guard.py refuses that merge while
-# the branch carries a change to a protected path, so the baseline can't be laundered.
-PROTECTED = {
-    "@base": ["preview/agent/"],
-    "gate/P1": [
-        "preview/test/run.sh",
-        "preview/test/e2e/md/",
-        "preview/test/golden/md/",
-        "preview/test/baseline.md",
-        "preview/test/thresholds/md.json",
-    ],
-    "gate/P3a": [
-        "preview/test/pdf/",
-        "preview/test/e2e/pdf/",
-        "preview/test/golden/pdf/",
-        "preview/test/thresholds/pdf.json",
-    ],
-    "gate/P3b": [
-        "preview/test/adapter.lua",
-    ],
-}
 GATE_TAGS = "refs/tags/gate/"
+# Files only run.py writes; agents may read them.
+OWNED = ["preview/work/PLAN.md", "preview/work/PROGRESS.md", "preview/work/BLOCKED.md",
+         "preview/work/STOP.md"]
+
+# (baseline, protected prefixes, exceptions). "dir/" covers everything under it.
+# A tag baseline applies once the tag exists; "@base" (merge-base of main and the
+# branch) applies always. main only moves through Egor or run.py's gate merge, and
+# run.py refuses that merge while the branch changes a protected path.
+PDF_TESTS = ["preview/test/pdf/", "preview/test/e2e/pdf/", "preview/test/golden/pdf/",
+             "preview/test/thresholds/pdf.json"]
+PROTECTED = [
+    ("@base", ["preview/agent/"], []),
+    # The whole harness (runner, drivers, image diff, probe, fixtures, md suites) is fixed
+    # at P1. Editable: unit tests, the adapter seam, and the PDF parts written later.
+    ("gate/P1", ["preview/test/"],
+     ["preview/test/unit/", "preview/test/adapter.lua", "preview/test/out/"] + PDF_TESTS),
+    # Corpus and thresholds are fixed at P3a; scenarios stay editable in P3b (every change
+    # justified in DECISIONS.md and checked by the gate review), then fixed at P3b.
+    ("gate/P3a", ["preview/test/pdf/", "preview/test/thresholds/pdf.json"], []),
+    ("gate/P3b", ["preview/test/e2e/pdf/", "preview/test/golden/pdf/",
+                  "preview/test/adapter.lua"], []),
+]
 
 
 def git(root, *args, check=True):
@@ -59,7 +57,7 @@ def project_root(data):
 
 def state_dir(root):
     d = Path(git(root, "rev-parse", "--git-common-dir"))
-    return (d if d.is_absolute() else root / d).resolve()
+    return (d if d.is_absolute() else Path(root) / d).resolve()
 
 
 def load_state(root, name):
@@ -70,13 +68,16 @@ def load_state(root, name):
 
 
 def save_state(root, name, value):
-    (state_dir(root) / name).write_text(json.dumps(value, indent=1, sort_keys=True))
+    path = state_dir(root) / name
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text(json.dumps(value, indent=1, sort_keys=True))
+    tmp.replace(path)
 
 
 def active(root, head="HEAD"):
-    """[(commit, label, paths)] for every protection in force."""
+    """[(commit, label, include, exclude)] for every protection in force."""
     out = []
-    for ref, paths in PROTECTED.items():
+    for ref, include, exclude in PROTECTED:
         if ref == "@base":
             commit, label = git(root, "merge-base", "main", head, check=False), "always"
             if not commit:
@@ -85,16 +86,35 @@ def active(root, head="HEAD"):
             commit = git(root, "rev-parse", "-q", "--verify", f"refs/tags/{ref}^{{commit}}", check=False)
             label = f"since {ref}"
         if commit:
-            out.append((commit, label, paths))
+            out.append((commit, label, include, exclude))
     return out
 
 
-def covers(paths, rel):
+def _under(paths, rel):
     return any(rel == p or (p.endswith("/") and rel.startswith(p)) for p in paths)
 
 
-def log_file():
-    base = os.environ.get("CLAUDE_PROJECT_DIR")
+def covers(include, exclude, rel):
+    return _under(include, rel) and not _under(exclude, rel)
+
+
+def changed(root, commit, include, exclude, head=None):
+    """Protected paths that differ between commit and head (None: the working tree)."""
+    rng = [commit] if head is None else [commit, head]
+    names = git(root, "diff", "--name-only", "--no-renames", *rng, "--", *include).splitlines()
+    return [p for p in names if p and covers(include, exclude, p)]
+
+
+def protected_changes(root, ref):
+    """['path (label)'] for every protected file that `ref` changes against its baseline."""
+    bad = []
+    for commit, label, include, exclude in active(root, ref):
+        bad += [f"{p} ({label})" for p in changed(root, commit, include, exclude, ref)]
+    return bad
+
+
+def log_file(root=None):
+    base = root or os.environ.get("CLAUDE_PROJECT_DIR")
     if base and (Path(base) / "preview").is_dir():
         d = Path(base) / "preview/test/out"
     else:
