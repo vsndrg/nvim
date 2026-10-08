@@ -23,9 +23,6 @@ const state = {
   cursorLine: null,
   // Scroll events before this timestamp are echoes of programmatic scrolls.
   suppressScrollUntil: 0,
-  // nvim gave the webview the keyboard (preview window is current): handle
-  // scrolling keys here instead of replaying them in nvim.
-  ownKeys: false,
 };
 
 function post(msg) {
@@ -188,7 +185,7 @@ const fullPage = () => page() - 2 * LINE_STEP;
 // Wheel/trackpad scrolling (native) takes over from keyboard motions.
 window.addEventListener('wheel', () => scroller.cancel(), { passive: true });
 
-// Scroll requests from nvim (its mappings run when the webview lacks focus).
+// Scroll requests from nvim's mappings (with a count, or keys that jump).
 function scrollAction(action, n = 1) {
   state.followLine = null;
   switch (action) {
@@ -265,14 +262,6 @@ function selectionText() {
   return sel && !sel.isCollapsed ? sel.toString() : '';
 }
 
-function releaseFocus(key) {
-  // nvim hands the keyboard back explicitly (ownKeys) when appropriate.
-  state.ownKeys = false;
-  scroller.holdEnd();
-  window.getSelection()?.removeAllRanges();
-  post(key ? { type: 'blur', key } : { type: 'blur' });
-}
-
 document.addEventListener('click', (e) => {
   if (e.button !== 0) return;
   const a = e.target.closest('a');
@@ -289,7 +278,6 @@ document.addEventListener('click', (e) => {
     } else if (href) {
       post({ type: 'link', href });
     }
-    releaseFocus();
     return;
   }
   const copyButton = e.target.closest('.copy-button');
@@ -298,7 +286,6 @@ document.addEventListener('click', (e) => {
     post({ type: 'copy', text: code?.textContent ?? '' });
     copyButton.classList.add('copied');
     setTimeout(() => copyButton.classList.remove('copied'), 1200);
-    releaseFocus();
     return;
   }
   const checkbox = e.target.closest('input.task-list-item-checkbox');
@@ -307,163 +294,69 @@ document.addEventListener('click', (e) => {
     e.preventDefault();
     const item = checkbox.closest('.task-list-item');
     post({ type: 'toggleTask', line: Number(item?.dataset.line ?? lineAtEvent(e)) });
-    releaseFocus();
     return;
   }
   if (e.detail > 1) return; // part of a double click
-  if (selectionText()) return; // keep focus: user is selecting text
+  if (selectionText()) return; // the user is selecting text
   post({ type: 'click', line: lineAtEvent(e) });
-  releaseFocus();
 });
 
 document.addEventListener('dblclick', (e) => {
   if (e.target.closest('a, .copy-button, input')) return;
   post({ type: 'dblclick', line: lineAtEvent(e) });
-  releaseFocus();
 });
 
-// Translate a DOM key event into nvim key notation, so a key pressed while
-// the webview had focus is replayed in nvim instead of being lost.
-const SPECIAL_KEYS = {
-  Enter: 'CR', Backspace: 'BS', Tab: 'Tab', Delete: 'Del', Escape: 'Esc',
-  ArrowUp: 'Up', ArrowDown: 'Down', ArrowLeft: 'Left', ArrowRight: 'Right',
-  Home: 'Home', End: 'End', PageUp: 'PageUp', PageDown: 'PageDown', ' ': 'Space',
-};
-
-function nvimKey(e) {
-  let key = SPECIAL_KEYS[e.key];
-  if (!key && /^F\d+$/.test(e.key)) key = e.key;
-  const special = key != null;
-  if (!key) {
-    if (e.key.length !== 1) return null;
-    key = e.key === '<' ? 'lt' : e.key === '\\' ? 'Bslash' : e.key;
-  }
-  const mods = (e.ctrlKey ? 'C-' : '') + (e.altKey ? 'M-' : '') + (e.metaKey ? 'D-' : '') +
-    (e.shiftKey && special ? 'S-' : '');
-  if (mods || special || key === 'lt' || key === 'Bslash') return `<${mods}${key}>`;
-  return key;
-}
-
-// Keys the preview handles itself while it has keyboard focus (nvim hands
-// focus to the webview whenever the preview window is current). Everything
-// else is replayed in nvim.
-let pendingG = 0; // timestamp of a lone g
-
-function postFindResult(r) {
-  post({ type: 'findResult', ...r });
-}
-
-// Letter keys by physical position, so scrolling works in any keyboard layout.
-function layoutFreeKey(e) {
-  if (/^Key[A-Z]$/.test(e.code)) {
-    return e.shiftKey ? e.code[3] : e.code[3].toLowerCase();
-  }
-  return e.key;
-}
-
-function handlePreviewKey(e) {
-  const key = layoutFreeKey(e);
-  // "gg" needs both presses within the mapping timeout; any other key in
-  // between (routed to nvim by Neovide) leaves a stale g behind.
-  const gPending = pendingG && performance.now() - pendingG < 1000;
-  pendingG = 0;
-  if (gPending && key === 'g') {
-    scroller.jumpTo(0);
-    return true;
-  }
-  switch (key) {
-    case 'j':
-    case 'ArrowDown':
-      state.followLine = null;
-      scroller.holdStart(1);
-      return true;
-    case 'k':
-    case 'ArrowUp':
-      state.followLine = null;
-      scroller.holdStart(-1);
-      return true;
-    case 'd':
-      state.followLine = null;
-      scroller.holdStart(1, page() / 2);
-      return true;
-    case 'u':
-      state.followLine = null;
-      scroller.holdStart(-1, page() / 2);
-      return true;
-    case 'f':
-    case 'PageDown':
-      state.followLine = null;
-      scroller.holdStart(1, fullPage());
-      return true;
-    case 'b':
-    case 'PageUp':
-      state.followLine = null;
-      scroller.holdStart(-1, fullPage());
-      return true;
-    case 'G':
-    case 'End':
-      scroller.jumpTo(Infinity);
-      return true;
-    case 'Home':
-      scroller.jumpTo(0);
-      return true;
-    case 'g':
-      pendingG = performance.now();
-      return true;
-    case 'n':
-      postFindResult(findNext(content(), false));
-      return true;
-    case 'N':
-      postFindResult(findNext(content(), true));
-      return true;
-    case 'Escape':
-      clearFind(content());
-      window.getSelection()?.removeAllRanges();
-      return true;
-  }
-  return false;
-}
-
+// Keys go to nvim; the page only has the keyboard after a click, and then
+// Neovide hands it only Cmd+C / Cmd+A (copy / select a mouse selection).
 document.addEventListener('keydown', (e) => {
-  if (['Shift', 'Control', 'Alt', 'Meta', 'CapsLock'].includes(e.key)) return;
   const cmdOnly = e.metaKey && !e.ctrlKey && !e.altKey;
   if (cmdOnly && e.key.toLowerCase() === 'c') {
     e.preventDefault();
     const text = selectionText();
     if (text) post({ type: 'copy', text });
-    return;
-  }
-  if (cmdOnly && e.key.toLowerCase() === 'a') {
+  } else if (cmdOnly && e.key.toLowerCase() === 'a') {
     e.preventDefault();
     const range = document.createRange();
     range.selectNodeContents(content());
     const sel = window.getSelection();
     sel.removeAllRanges();
     sel.addRange(range);
-    return;
   }
-  e.preventDefault();
-  const plain = !e.ctrlKey && !e.altKey && !e.metaKey;
-  if (state.ownKeys && plain && handlePreviewKey(e)) return;
-  // Focus came from a mouse selection: Esc just hands the keyboard back.
-  const replay = e.key === 'Escape' && !state.ownKeys ? undefined : nvimKey(e);
-  releaseFocus(replay ?? undefined);
 }, true);
 
-// Direction of the keys that scroll while held (keyup may come shifted).
-const HOLD_KEYS = {
-  j: 1, ArrowDown: 1, d: 1, f: 1, PageDown: 1,
-  k: -1, ArrowUp: -1, u: -1, b: -1, PageUp: -1,
-};
+// Physical keys down in the editor, as Neovide reports them (DOM `code`
+// names). A key reaches nvim before its report reaches the page, so when one
+// of nvim's scroll mappings arrives, its key is the latest one reported down.
+const keysDown = new Set();
+let lastKeyDown = null;
+let heldKey = null; // the key a held motion lasts for: { code, dir }
 
-document.addEventListener('keyup', (e) => {
-  const key = layoutFreeKey(e);
-  const dir = HOLD_KEYS[key.length === 1 ? key.toLowerCase() : key];
-  if (dir) scroller.holdEnd(dir);
-}, true);
+function onKey(code, down) {
+  if (down) {
+    keysDown.add(code);
+    lastKeyDown = code;
+  } else {
+    keysDown.delete(code);
+    if (heldKey?.code === code) {
+      scroller.holdEnd(heldKey.dir);
+      heldKey = null;
+    }
+  }
+}
 
-// A lost keyup (focus moved mid-hold) must not leave the page scrolling.
-window.addEventListener('blur', () => scroller.holdEnd());
+// A scroll mapping without a count: scrolls while its key is held, a tap is
+// one step. Its key repeats arrive as the same request and change nothing.
+function holdAction(action, dir) {
+  state.followLine = null;
+  const step = action === 'halfpage' ? page() / 2 : action === 'page' ? fullPage() : null;
+  const code = lastKeyDown;
+  scroller.holdStart(dir, step);
+  if (code != null && keysDown.has(code)) {
+    heldKey = { code, dir };
+  } else {
+    scroller.holdEnd(dir);
+  }
+}
 
 // Diagnostics: frame pacing of a 1 s held-key scroll (`:MdPreview bench`).
 // fps is the page's rAF rate (the compositor plays the motion regardless);
@@ -536,16 +429,15 @@ function receive(msg) {
     case 'bench':
       bench();
       break;
-    case 'ownKeys':
-      state.ownKeys = !!msg.enabled;
-      pendingG = 0;
-      if (!state.ownKeys) scroller.holdEnd();
+    case 'key':
+      onKey(msg.code, msg.down);
       break;
     case 'activeLine':
       document.documentElement.classList.toggle('show-active-line', !!msg.enabled);
       break;
     case 'scroll':
-      scrollAction(msg.action, msg.n);
+      if (msg.hold) holdAction(msg.action, msg.n);
+      else scrollAction(msg.action, msg.n);
       break;
     case 'find': {
       const r = find(content(), msg.query, msg.backwards);
@@ -559,6 +451,7 @@ function receive(msg) {
     }
     case 'clearFind':
       clearFind(content());
+      window.getSelection()?.removeAllRanges();
       break;
   }
 }

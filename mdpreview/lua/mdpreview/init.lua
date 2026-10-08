@@ -182,39 +182,20 @@ end
 local function close_session(s) end -- forward declaration, defined below
 local function set_mode(s, mode) end
 
--- Keyboard focus: while the preview window is current (normal mode, nothing
--- pending) the webview owns the keyboard, so j/k scroll from keydown to keyup
--- without key-repeat delay. Keys it does not handle are replayed here.
-local function view_is_current(s)
-  return s.view and api.nvim_get_current_buf() == s.view
-end
-
--- Keys the page handles itself (see handlePreviewKey in web/src/main.js).
--- Neovide routes every other key straight back to nvim, in order.
-local PAGE_KEYS = {
-  "j", "k", "d", "u", "f", "b", "g", "G", "n", "N",
-  "<Esc>", "<Up>", "<Down>", "<PageUp>", "<PageDown>", "<Home>", "<End>",
-}
-
-local function set_webview_focus(s, focus)
-  if s.focused == focus then
-    return
-  end
-  s.focused = focus
-  post(s, { type = "ownKeys", enabled = focus })
-  neovide.webview.focus(s.id, focus, focus and PAGE_KEYS or nil)
-end
-
-local function refocus(s)
-  if s.ready and view_is_current(s) and api.nvim_get_mode().mode == "n" then
-    set_webview_focus(s, true)
-  end
-end
-
--- Fallback for keys that reached nvim (the webview did not have focus yet).
+-- Keys reach nvim like in any other window; the preview's own keys are plain
+-- mappings of the view buffer. Without a count, j/k/d/u/f/b scroll for as long
+-- as the key is held: Neovide tells the page when a physical key goes up, so
+-- the motion needs no key repeats.
 local function scroll(s, action, n)
   post(s, { type = "scroll", action = action, n = n })
-  refocus(s)
+end
+
+local function hold(s, action, dir)
+  if vim.v.count == 0 then
+    post(s, { type = "scroll", action = action, n = dir, hold = true })
+  else
+    scroll(s, action, dir * vim.v.count)
+  end
 end
 
 local function find_prompt(s, backwards)
@@ -230,20 +211,22 @@ local function view_keymaps(s)
   local function map(lhs, fn, desc)
     vim.keymap.set("n", lhs, fn, { buffer = s.view, nowait = true, silent = true, desc = desc })
   end
-  map("j", function() scroll(s, "line", vim.v.count1) end, "Preview: scroll down")
-  map("k", function() scroll(s, "line", -vim.v.count1) end, "Preview: scroll up")
-  map("<Down>", function() scroll(s, "line", vim.v.count1) end, "Preview: scroll down")
-  map("<Up>", function() scroll(s, "line", -vim.v.count1) end, "Preview: scroll up")
+  map("j", function() hold(s, "line", 1) end, "Preview: scroll down")
+  map("k", function() hold(s, "line", -1) end, "Preview: scroll up")
+  map("<Down>", function() hold(s, "line", 1) end, "Preview: scroll down")
+  map("<Up>", function() hold(s, "line", -1) end, "Preview: scroll up")
   map("<C-e>", function() scroll(s, "line", vim.v.count1) end, "Preview: scroll down")
   map("<C-y>", function() scroll(s, "line", -vim.v.count1) end, "Preview: scroll up")
-  map("d", function() scroll(s, "halfpage", vim.v.count1) end, "Preview: half page down")
-  map("u", function() scroll(s, "halfpage", -vim.v.count1) end, "Preview: half page up")
-  map("f", function() scroll(s, "page", vim.v.count1) end, "Preview: page down")
-  map("b", function() scroll(s, "page", -vim.v.count1) end, "Preview: page up")
-  map("<PageDown>", function() scroll(s, "page", 1) end, "Preview: page down")
-  map("<PageUp>", function() scroll(s, "page", -1) end, "Preview: page up")
+  map("d", function() hold(s, "halfpage", 1) end, "Preview: half page down")
+  map("u", function() hold(s, "halfpage", -1) end, "Preview: half page up")
+  map("f", function() hold(s, "page", 1) end, "Preview: page down")
+  map("b", function() hold(s, "page", -1) end, "Preview: page up")
+  map("<PageDown>", function() hold(s, "page", 1) end, "Preview: page down")
+  map("<PageUp>", function() hold(s, "page", -1) end, "Preview: page up")
   map("gg", function() scroll(s, "top") end, "Preview: top")
   map("G", function() scroll(s, "bottom") end, "Preview: bottom")
+  map("<Home>", function() scroll(s, "top") end, "Preview: top")
+  map("<End>", function() scroll(s, "bottom") end, "Preview: bottom")
   map("/", function() find_prompt(s, false) end, "Preview: search")
   map("?", function() find_prompt(s, true) end, "Preview: search backwards")
   map("n", function() post(s, { type = "findNext", backwards = false }) end, "Preview: next match")
@@ -458,11 +441,6 @@ function handlers.copy(_, msg)
   vim.notify(("mdpreview: copied %d characters"):format(vim.fn.strchars(msg.text)))
 end
 
-function handlers.blur(s)
-  -- Neovide already returned the keyboard to nvim (and replayed msg.key in order).
-  s.focused = false
-end
-
 function handlers.benchResult(_, msg)
   vim.g.mdpreview_bench = msg
   vim.notify(("mdpreview: %d fps (median %.1f ms, p95 %.1f ms, max %.1f ms, %d frames), step %g px, %d/%d uneven"):format(
@@ -606,36 +584,6 @@ local function attach_autocmds(s)
           M.retarget(s, ev.buf)
         end
       end)
-    end,
-  })
-
-  api.nvim_create_autocmd("SafeState", {
-    group = group,
-    callback = function()
-      if not s.focused then
-        refocus(s)
-      end
-    end,
-  })
-  -- The page owns the keyboard only while the view is the current buffer in
-  -- normal mode. A key the page routes back to nvim sends `blur` first, and
-  -- SafeState may hand focus back before nvim has processed that key, so every
-  -- way out has to release it: another window, another buffer in this window
-  -- (`:e #` would leave a hidden webview holding the keyboard), another mode.
-  api.nvim_create_autocmd({ "WinLeave", "BufLeave" }, {
-    group = group,
-    callback = function()
-      if view_is_current(s) then
-        set_webview_focus(s, false)
-      end
-    end,
-  })
-  api.nvim_create_autocmd("ModeChanged", {
-    group = group,
-    callback = function()
-      if s.focused and api.nvim_get_mode().mode ~= "n" then
-        set_webview_focus(s, false)
-      end
     end,
   })
 
@@ -833,7 +781,6 @@ function M.status()
       src = api.nvim_buf_get_name(src),
       mode = s.mode,
       ready = s.ready,
-      focused = s.focused,
       preview_line = s.preview_line,
     })
   end

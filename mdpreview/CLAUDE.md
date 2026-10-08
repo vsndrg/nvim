@@ -26,14 +26,15 @@ The plugin is loaded by `lua/plugins/mdpreview.lua` (lazy `dir =` spec, `ft = ma
 
 ## Neovide side (`~/src/neovide`, branch `webview`)
 
-- Lua API `neovide.webview.{open(id, winid, path), set_window(id, winid), post(id, json), focus(id, bool, keys), close(id), on_message[id]}`.
+- Lua API `neovide.webview.{open(id, winid, path), set_window(id, winid), post(id, json), close(id), on_message[id]}`.
   It is generic, so there is nothing markdown-specific in Neovide.
 - `src/platform/macos/webview.rs`:
   - every frame the view is moved onto the window's pixel rect;
   - it is hidden when the window isn't displayed;
-  - it is masked under floating windows (`CAShapeLayer`).
+  - it is masked under floating windows (`CAShapeLayer`);
+  - every page gets `{"type":"key","code":"KeyJ","down":bool}` when a physical key goes down or up in the editor (DOM `code` names, no repeats; all keys reported up on focus loss). It is posted after the key was sent to nvim.
 - `win_pos` carries the window handle down to `RenderedWindow.window_handle`. Without it, a winid can't be matched to a grid.
-- `KeyRoutingWebView`: only the keys passed to `focus(..., keys)` plus Cmd+C/Cmd+A reach the page. Every other key event goes synchronously from `keyDown:` to the editor view. `resignFirstResponder` posts `{"type":"blur"}`.
+- `KeyRoutingWebView`: the page never takes the keyboard. It becomes first responder only through the mouse; then Cmd+C/Cmd+A reach it, and every other key event goes synchronously from `keyDown:` to the editor view.
 - After changing Neovide:
   1. Run `cargo test --release`, `cargo clippy --release` and `cargo fmt --check`, then commit on `webview`. Commit as Egor Denisov, with no AI attribution.
   2. Regenerate `neovide-webview.patch`.
@@ -47,11 +48,11 @@ nvim → page (`neovide.webview.post` → `window.neovideReceive`):
 - `follow {line}` (editor topline, 0-based)
 - `cursor {line}`
 - `theme {name, mode, vars?}`
-- `scroll {action, n}`
+- `scroll {action, n, hold?}` (`hold`: no count, scroll while the key is held)
 - `find {query, backwards}`, `findNext`, `clearFind`
 - `activeLine {enabled}`
-- `ownKeys {enabled}`
 - `bench`
+- `key {code, down}` (from Neovide itself, not from nvim)
 
 page → nvim (`webkit.messageHandlers.neovide` → `on_message`):
 - `ready`
@@ -60,7 +61,6 @@ page → nvim (`webkit.messageHandlers.neovide` → `on_message`):
 - `link {href}`
 - `copy {text}`
 - `toggleTask {line}`
-- `blur`
 - `findResult`
 - `benchResult`
 
@@ -81,14 +81,11 @@ Lines are 0-based markdown-it `map[0]` values.
 
 ## Keyboard model
 
-- While the view window is current in normal mode, Lua gives the webview the keyboard on `SafeState` (`set_webview_focus`, `PAGE_KEYS`). This lets JS see keydown and keyup, so held `j`/`k`/`d`/`u`/`f`/`b` scroll smoothly with no key-repeat delay.
-- Neovide routes every other key to nvim natively.
-- Release focus on every way out of "view current, normal mode": `WinLeave`, `BufLeave` (`:e #` in the same window) and `ModeChanged`.
-  - Why: a routed key sends `blur` before nvim has processed the key itself, so `SafeState` hands focus back to the page first.
-  - If the key then leaves the view, the webview is hidden while it is first responder. Every keystroke then goes to the NSWindow and beeps.
-  - `--remote-send` does not show this: test focus with real keys (`CGEvent.postToPid`).
+- Every key goes to nvim, as in any other window. The preview's own keys (`j k d u f b gg G / ? n N <Esc> <CR> q`, arrows, PageUp/Down, Home/End) are buffer-local mappings of the view buffer (`view_keymaps`), so nvim's mapping engine decides what a key means: `<leader>f`, counts and pending mappings work as everywhere.
+- The page must never decide that on its own. The previous model gave the webview the keyboard on `SafeState` with a fixed key list and handed it back on `blur`. `<Space>` went to nvim, and `blur` could arrive and be followed by `SafeState` before `<Space>` itself was processed. The page then got the keyboard back and ate the `f` of `<leader>f` (measured: `<Space>f` 18/30, `<Space>dm` 1/30, the eaten keys paged the preview).
+- Held keys: without a count, j/k/d/u/f/b and arrows/PageUp/Down post `scroll {hold = true}`. The page starts the motion and keeps it going until Neovide reports the latest key that went down as up (`holdAction` / `onKey` in `main.js`). Neovide posts the key report after sending the key to nvim, so the report is always in the page before the mapping's `scroll`; a tap whose key is already up is one step. OS key repeats re-run the mapping and change nothing.
 - Never replay keys from JS through nvim (`nvim_input` / `exec_lua`). It races with direct input: `<Space>mp` arrived as `<Space>p`.
-- Letter keys are matched by physical key (`e.code` in JS, ANSI key codes in Rust), so the RU layout works.
+- Keys follow the keyboard layout like the rest of nvim (no `langmap` in this config): in the RU layout the preview's keys do nothing, as everywhere else.
 
 ## Build / test
 
@@ -125,6 +122,8 @@ Lines are 0-based markdown-it `map[0]` values.
   2. Drive it with `nvim --server <sock> --remote-expr`.
   3. Screenshot **only that window**: get its CGWindowID from `CGWindowListCopyWindowInfo` by PID (the largest layer-0 window), then `screencapture -x -o -l <id>`. Never capture the whole screen.
   4. Send real keys with `CGEvent.postToPid(pid)`. Never post global mouse or keyboard events: the test window is usually behind the user's apps.
+     - The characters come from the user's current layout (often RU): set them with `keyboardSetUnicodeString` on each event. Don't use `langmap` in the test init: it translates only the first key of a mapping, and a stray `f` then waits for a character and blocks `--remote-expr`.
+     - In zsh, pass a list of key specs held in a variable as `${=args}`: zsh does not word-split `$args`.
 
 ## Pitfalls already hit
 
