@@ -575,14 +575,12 @@ local function on_clangd_attach(client, bufnr)
   map(bufnr, "n", "gh", function() switch_source_header(bufnr) end, "C++: switch source/header")
   map(bufnr, "n", "<F4>", function() switch_source_header(bufnr) end, "C++: switch source/header")
 
-  -- Code vision, as in Go. `gd` / `gi` / `gu` pressed again where they
-  -- landed come back.
+  -- Code vision, as in Go. `gu` pressed again where it landed comes back;
+  -- `gd` / `gi` do not, so that pressed again they go on to the next symbol.
   local lens = require("lang.lens")
   lens.attach(bufnr, M.lens)
-  map(bufnr, "n", "gd", lens.toggle("gd", function(done) lens.declaration(bufnr, done) end),
-    "C++: declaration (prototype); again: back")
-  map(bufnr, "n", "gi", lens.toggle("gi", function(done) lens.open(bufnr, done) end),
-    "C++: implementations, else definition (body); again: back")
+  map(bufnr, "n", "gd", function() lens.declaration(bufnr) end, "C++: declaration (prototype)")
+  map(bufnr, "n", "gi", function() lens.open(bufnr) end, "C++: implementations, else definition (body)")
   map(bufnr, "n", "gu", lens.toggle("gu", function(done) lens.usages(bufnr, done) end),
     "C++: usages; again: back")
 
