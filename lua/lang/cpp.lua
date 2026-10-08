@@ -575,15 +575,16 @@ local function on_clangd_attach(client, bufnr)
   map(bufnr, "n", "gh", function() switch_source_header(bufnr) end, "C++: switch source/header")
   map(bufnr, "n", "<F4>", function() switch_source_header(bufnr) end, "C++: switch source/header")
 
-  -- Code vision, as in Go. `gd` / `gi` pressed again where they landed come
-  -- back.
+  -- Code vision, as in Go. `gd` / `gi` / `gu` pressed again where they
+  -- landed come back.
   local lens = require("lang.lens")
   lens.attach(bufnr, M.lens)
   map(bufnr, "n", "gd", lens.toggle("gd", function(done) lens.declaration(bufnr, done) end),
     "C++: declaration (prototype); again: back")
   map(bufnr, "n", "gi", lens.toggle("gi", function(done) lens.open(bufnr, done) end),
     "C++: implementations, else definition (body); again: back")
-  map(bufnr, "n", "gu", function() lens.usages(bufnr) end, "C++: usages")
+  map(bufnr, "n", "gu", lens.toggle("gu", function(done) lens.usages(bufnr, done) end),
+    "C++: usages; again: back")
 
   -- cppman lookup.
   map(bufnr, "n", "gK",         function() cppman_lookup(vim.fn.expand("<cword>")) end, "C++: cppman lookup (word)")
