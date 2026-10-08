@@ -326,22 +326,59 @@ function M.toggle_format_on_save(bufnr)
   vim.notify("Go format on save: " .. (vim.b[bufnr].go_format_on_save and "ON" or "OFF"))
 end
 
+-- The WorkspaceEdit of a gopls code action: its own, or the resolved one when
+-- gopls sent it bare. When gopls cannot compute a fix, resolve hands back the
+-- gopls.apply_fix command instead, and only running it reports why ("cannot
+-- inline: generic methods not yet supported"); with ResolveEdits set the
+-- command returns the edit rather than applying it. `request(method, params)`
+-- returns result, err: blocking, or suspending a coroutine. Returns nil and
+-- gopls's reason when there is no edit.
+function M.code_action_edit(request, action)
+  if action.edit then return action.edit end
+  local resolved, err = request("codeAction/resolve", action)
+  if err then return nil, err.message end
+  if resolved and resolved.edit then return resolved.edit end
+  local command = resolved and resolved.command
+  local args = type(command) == "table" and command.arguments and command.arguments[1]
+  if command and command.command == "gopls.apply_fix" and type(args) == "table" and args.ResolveEdits then
+    local result, cerr = request("workspace/executeCommand", {
+      command = command.command, arguments = command.arguments,
+    })
+    if cerr then return nil, cerr.message end
+    if type(result) == "table" and (result.documentChanges or result.changes) then return result end
+  end
+  return nil, "gopls returned no edit"
+end
+
+-- gopls's edits organizing the imports of `bufnr` (see code_action_edit for
+-- `request`).
+function M.organize_imports_edits(bufnr, request)
+  local params = {
+    textDocument = { uri = vim.uri_from_bufnr(bufnr) },
+    range = { start = { line = 0, character = 0 }, ["end"] = { line = 0, character = 0 } },
+    context = { only = { "source.organizeImports" }, diagnostics = {} },
+  }
+  local edits = {}
+  for _, action in ipairs(request("textDocument/codeAction", params) or {}) do
+    local edit = M.code_action_edit(request, action)
+    if edit then table.insert(edits, edit) end
+  end
+  return edits
+end
+
+-- Organizes the imports of `bufnr` before returning: the format-on-save hook
+-- and <leader>gi.
 function M.organize_imports(bufnr, timeout_ms)
   bufnr = bufnr or vim.api.nvim_get_current_buf()
-  local clients = vim.lsp.get_clients({ bufnr = bufnr, name = "gopls" })
-  local client = clients[1]
+  local client = vim.lsp.get_clients({ bufnr = bufnr, name = "gopls" })[1]
   if not client then return end
-
-  local params = vim.lsp.util.make_range_params(0, client.offset_encoding)
-  params.context = { only = { "source.organizeImports" }, diagnostics = {} }
-
-  local responses = client:request_sync("textDocument/codeAction", params, timeout_ms or 1500, bufnr)
-  for _, action in ipairs(responses and responses.result or {}) do
-    -- gopls answers resolved actions, so `edit` is present; a command-only
-    -- action would need a workspace/executeCommand round trip.
-    if action.edit then
-      vim.lsp.util.apply_workspace_edit(action.edit, client.offset_encoding)
-    end
+  local edits = M.organize_imports_edits(bufnr, function(method, params)
+    local response, err = client:request_sync(method, params, timeout_ms or 1500, bufnr)
+    if not response then return nil, { message = err } end
+    return response.result, response.err
+  end)
+  for _, edit in ipairs(edits) do
+    vim.lsp.util.apply_workspace_edit(edit, client.offset_encoding)
   end
 end
 
@@ -686,6 +723,11 @@ local function on_gopls_attach(_, bufnr)
       })
     end
   end
+  -- Overrides the global <leader>ca: the same LSP code actions, plus GoLand's
+  -- inline / extract refactorings on top (lua/lang/go_refactor.lua).
+  vim.keymap.set({ "n", "x" }, "<leader>ca", function()
+    require("lang.go_refactor").code_action(bufnr)
+  end, { buffer = bufnr, silent = true, desc = "Go: code actions, inline / extract" })
 end
 
 -- ─────────────────────────────────────────────────────────────────────────────
@@ -713,7 +755,8 @@ function M.show_keymaps()
     add("")
   end
 
-  add("  Also: K hover · gd definition · gr references · rn rename · " .. leader .. "ca code action", "Comment")
+  add("  Also: K hover · gd definition · gr references · rn rename", "Comment")
+  add("        " .. leader .. "ca code actions + inline / extract (visual: extract the selection)", "Comment")
   add("  Commands: :GoKeys · :GoProjectTags · go.nvim's :Go* · :Lazy · :LspInfo", "Comment")
   add("")
   add("  q / <Esc> to close", "Comment")

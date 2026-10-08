@@ -65,7 +65,7 @@
 | `gd` | Перейти к определению |
 | `gr` | Показать ссылки |
 | `rn` | Переименовать символ |
-| `<leader>ca` | Code action |
+| `<leader>ca` | Code action (в Go: + inline / extract, в visual — extract выделения) |
 | `gl` | Показать диагностику (float) |
 | `[d` / `]d` | Предыдущая/следующая диагностика |
 
