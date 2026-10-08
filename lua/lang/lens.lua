@@ -517,11 +517,45 @@ local function marker_on(bufnr, row)
   return nil
 end
 
+-- Whether `loc` is the symbol under the cursor (`params`): a jump there goes
+-- nowhere. Files are compared by inode, since the server and the buffer may
+-- spell a path on a case-insensitive disk differently.
+local function is_here(loc, params)
+  local range = loc.targetSelectionRange or loc.range
+  if not (before_or_at(range.start, params.position) and before_or_at(params.position, range["end"])) then
+    return false
+  end
+  local a = vim.uv.fs_stat(vim.uri_to_fname(loc_uri(loc)))
+  local b = vim.uv.fs_stat(vim.uri_to_fname(params.textDocument.uri))
+  return a ~= nil and b ~= nil and a.dev == b.dev and a.ino == b.ino
+end
+
+-- Every declaration and definition of the symbol: its references counted
+-- with declarations minus those without. Finds what textDocument/declaration
+-- misses, like the `extern` prototype in another .c file of a function whose
+-- body the cursor is on.
+local function declarations_by_references(client, params, bufnr, callback)
+  local function refs(include, cb)
+    local p = vim.tbl_extend("force", params, { context = { includeDeclaration = include } })
+    client:request("textDocument/references", p, function(err, result) cb(not err and result or nil) end, bufnr)
+  end
+  refs(true, function(all)
+    if not all then return callback({}) end
+    refs(false, function(uses)
+      if not uses then return callback({}) end
+      local used = {}
+      for _, loc in ipairs(uses) do used[location_key(loc)] = true end
+      callback(vim.tbl_filter(function(loc) return not used[location_key(loc)] end, all))
+    end)
+  end)
+end
+
 -- Shared by `gi` and `gu`: the cursor line's marker answers first, so both
 -- keys work from anywhere on a declaration line; a line without an answer
 -- in its marker asks the server about the symbol under the cursor, so a call
--- site like `s.Area()` works too. `methods` are tried in order until one
--- finds something.
+-- site like `s.Area()` works too. `methods` (LSP methods, or functions
+-- `(client, params, bufnr, callback(locations))`) are tried in order until
+-- one finds something other than the cursor's own symbol.
 local function open_at_cursor(bufnr, from_marker, methods, context, title, empty_msg, done)
   bufnr = (bufnr == nil or bufnr == 0) and vim.api.nvim_get_current_buf() or bufnr
   local client = client_of(bufnr)
@@ -541,16 +575,22 @@ local function open_at_cursor(bufnr, from_marker, methods, context, title, empty
 
   local params = vim.lsp.util.make_position_params(0, client.offset_encoding)
   params.context = context
+  local function request(method, callback)
+    if type(method) == "function" then return method(client, params, bufnr, callback) end
+    client:request(method, params, function(err, result)
+      callback(err and {} or as_list(result))
+    end, bufnr)
+  end
   local function try(i)
     if not methods[i] then
       vim.notify(empty_msg, vim.log.levels.INFO)
       return
     end
-    client:request(methods[i], params, function(err, result)
-      local locations = err and {} or as_list(result)
+    request(methods[i], function(locations)
+      locations = vim.tbl_filter(function(loc) return not is_here(loc, params) end, locations)
       if #locations == 0 then return try(i + 1) end
       show(locations, client.offset_encoding, title, done)
-    end, bufnr)
+    end)
   end
   try(1)
 end
@@ -570,10 +610,12 @@ function M.usages(bufnr, done)
     { "textDocument/references" }, { includeDeclaration = false }, TITLES.usages, "No usages found", done)
 end
 
--- Declaration of the symbol under the cursor: a C prototype in its header.
+-- Declaration of the symbol under the cursor: a C prototype in its header,
+-- or wherever else it is declared when the server ranks none above the body
+-- the cursor is on.
 function M.declaration(bufnr, done)
-  open_at_cursor(bufnr, nil, { "textDocument/declaration" }, nil, "Declarations",
-    "No declaration found", done)
+  open_at_cursor(bufnr, nil, { "textDocument/declaration", declarations_by_references }, nil,
+    "Declarations", "No declaration found", done)
 end
 
 -- The last jump made through toggle(): its key, where it started and where
