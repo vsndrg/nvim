@@ -91,6 +91,32 @@ return {
             or before:match('::[%w_]*$') ~= nil
       end
 
+      -- blink.cmp 1.10.2 finds the mapping a 'fallback' falls through to by
+      -- comparing keycodes, where <C-M> and <CR> are both "\r": Enter in
+      -- Insert mode ran the <C-m> map (pinned .md). Match the way Nvim does:
+      -- by the raw lhs, or by its simplified form (lhsrawalt) only when the
+      -- mapping covers that key too. Fixed upstream after 1.10.2, where these
+      -- functions are gone and this patch does nothing.
+      local fallback = require('blink.cmp.keymap.fallback')
+      if fallback.get_non_blink_global_mapping_for_key then
+        local DESC_PREFIX = require('blink.cmp.keymap.apply').DESC_PREFIX
+        local function find(mappings, key)
+          local raw = vim.api.nvim_replace_termcodes(key, true, true, true)
+          for _, m in ipairs(mappings) do
+            if (m.lhsraw == raw or m.lhsrawalt == raw)
+                and not (m.desc and vim.startswith(m.desc, DESC_PREFIX)) then
+              return m
+            end
+          end
+        end
+        fallback.get_non_blink_global_mapping_for_key = function(mode, key)
+          return find(vim.api.nvim_get_keymap(mode), key)
+        end
+        fallback.get_non_blink_buffer_mapping_for_key = function(mode, key)
+          return find(vim.api.nvim_buf_get_keymap(0, mode), key)
+        end
+      end
+
       require('blink.cmp').setup({
         -- Single switch silences every source inside comments / strings.
         enabled = function() return not in_comment_or_string() end,
