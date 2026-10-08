@@ -34,9 +34,6 @@ km.set("n", "<leader>-", "a <Esc><Left>", opts)
 -- Add space before cursor in normal mode
 km.set("n", "<leader>_", "i <Esc><Right>", opts)
 
--- Save init.lua file command
-km.set("n", "<leader>s", ":source %<CR>", opts)
-
 -- Move rest of the line on the next line command
 km.set("n", "<leader><CR>", "i<CR><Esc>k$", opts)
 -- Tab in normal mode command

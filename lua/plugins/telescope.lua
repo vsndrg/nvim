@@ -9,7 +9,18 @@ return {
       local builtin = require("telescope.builtin")
       vim.keymap.set('n', '<leader>f', builtin.find_files, {})
       vim.keymap.set('n', '<leader>l', builtin.live_grep, {})
-      vim.keymap.set('n', '<leader>s', builtin.lsp_document_symbols, {})
+      local actions = require("telescope.actions")
+      vim.keymap.set('n', '<leader>s', function()
+        builtin.lsp_document_symbols({
+          -- center the screen on the symbol after jumping to it
+          attach_mappings = function(_, map)
+            local jump = actions.select_default + actions.center
+            map({ 'i', 'n' }, '<CR>', jump)
+            map('n', 'l', jump)
+            return true
+          end,
+        })
+      end, {})
       vim.keymap.set('n', '<leader>b', function()
         builtin.oldfiles({ initial_mode = "normal" })
       end, {})
@@ -17,7 +28,6 @@ return {
         vim.cmd('edit #')
       end, {})
 
-      local actions = require("telescope.actions")
       require("telescope").setup{
         defaults = {
           mappings = {
