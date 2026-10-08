@@ -609,6 +609,62 @@ local function toggle_inlay_hints(bufnr)
 end
 
 -- ─────────────────────────────────────────────────────────────────────────────
+-- Code vision (lua/lang/lens.lua)
+-- ─────────────────────────────────────────────────────────────────────────────
+
+local Kind = vim.lsp.protocol.SymbolKind
+
+-- Declarations whose usages are counted. Fields and interface methods are
+-- left out, as in GoLand.
+local USAGE_KINDS = {
+  [Kind.Interface] = true, [Kind.Struct] = true, [Kind.Class] = true,
+  [Kind.Function] = true, [Kind.Method] = true,
+  [Kind.Variable] = true, [Kind.Constant] = true,
+}
+
+-- Nothing can reference these: the blank identifier, init, and the functions
+-- `go test` calls by name.
+local function unreferenceable(sym, bufnr)
+  if sym.name == "_" or sym.name == "init" then return true end
+  return sym.kind == Kind.Function
+    and vim.api.nvim_buf_get_name(bufnr):match("_test%.go$") ~= nil
+    and (sym.name:match("^Test") or sym.name:match("^Benchmark")
+      or sym.name:match("^Fuzz") or sym.name:match("^Example")) ~= nil
+end
+
+M.lens = {
+  client = "gopls",
+  -- Interfaces and their methods ask what implements them (↓), concrete
+  -- types and methods what they implement (↑). Fields, functions and
+  -- embedded interfaces have no implementation relation.
+  queries = function(sym, parent, bufnr)
+    if parent then
+      return (parent.kind == Kind.Interface and sym.kind == Kind.Method) and { "down" } or {}
+    end
+    local queries = {}
+    if USAGE_KINDS[sym.kind] and not unreferenceable(sym, bufnr) then
+      table.insert(queries, "usages")
+    end
+    if sym.kind == Kind.Interface then
+      table.insert(queries, "down")
+    elseif sym.kind == Kind.Struct or sym.kind == Kind.Class or sym.kind == Kind.Method then
+      table.insert(queries, "up")
+    end
+    return queries
+  end,
+  -- "Shape" for the buffer's own package, "fmt.Stringer" for another one,
+  -- nil for an unexported interface of another package (runtime.stringer and
+  -- the like): user code cannot name it, so it is only noise in the marker
+  -- and the picker.
+  up_name = function(name, uri, own_dir)
+    local dir = vim.fs.dirname(vim.uri_to_fname(uri))
+    if dir == own_dir then return name end
+    if not name:match("^%u") then return nil end
+    return vim.fs.basename(dir) .. "." .. name
+  end,
+}
+
+-- ─────────────────────────────────────────────────────────────────────────────
 -- Buffer-local keymaps
 -- ─────────────────────────────────────────────────────────────────────────────
 
@@ -697,9 +753,9 @@ M.keymaps = {
     group = "Navigate & project",
     items = {
       { "gi",         "implementations / implemented interfaces (↓ ↑)",
-        function(b) require("lang.go_lens").open(b) end },
+        function(b) require("lang.lens").open(b) end },
       { "gu",         "usages",
-        function(b) require("lang.go_lens").usages(b) end },
+        function(b) require("lang.lens").usages(b) end },
       { "<leader>go", "jump between file and _test.go", go_command("GoAlt!") },
       { "<leader>gd", "godoc for symbol",               go_command("GoDoc") },
       { "<leader>gc", "toggle coverage overlay",        go_command("GoCoverage") },
@@ -820,7 +876,7 @@ function M.setup_autocmds()
       local client = vim.lsp.get_client_by_id(args.data.client_id)
       if not client or client.name ~= "gopls" then return end
       on_gopls_attach(client, args.buf)
-      require("lang.go_lens").attach(args.buf)
+      require("lang.lens").attach(args.buf, M.lens)
       if vim.lsp.inlay_hint then
         vim.lsp.inlay_hint.enable(true, { bufnr = args.buf })
       end
@@ -959,7 +1015,6 @@ function M.setup()
   ensure_path()
   M.setup_server()
   M.setup_autocmds()
-  require("lang.go_lens").setup()
 
   vim.api.nvim_create_user_command("GoProjectTags", function()
     M.refresh_build_tags()
