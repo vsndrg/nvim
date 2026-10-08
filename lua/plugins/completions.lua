@@ -207,15 +207,6 @@ return {
                 { 'kind_icon' },
                 { 'label', 'label_description', gap = 1 },
               },
-              components = {
-                -- clangd возвращает некоторые items с ведущим пробелом
-                -- (context-sensitive padding) — выравниваем все labels по левому краю.
-                label = {
-                  text = function(ctx)
-                    return (ctx.label:gsub('^%s+', '')) .. ctx.label_detail
-                  end,
-                },
-              },
             },
           },
           documentation = {

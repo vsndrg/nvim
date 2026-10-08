@@ -178,6 +178,9 @@ function M.setup_server()
       "--completion-style=bundled",
       "--function-arg-placeholders=true",
       "--header-insertion=never",
+      -- No " " / "•" before every completion label: the menu highlights
+      -- matched characters by the label's offsets.
+      "--header-insertion-decorators=false",
       "--fallback-style=LLVM",
       "--pch-storage=memory",
       "--cross-file-rename",
