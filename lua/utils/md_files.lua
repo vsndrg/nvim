@@ -107,23 +107,18 @@ function M.pick()
   }):find()
 end
 
--- Buffer whose file the current window shows: a preview view stands for its
--- markdown source (mdpreview is loaded lazily; without it there are no views).
-local function current_source()
-  local buf = vim.api.nvim_get_current_buf()
-  local mdpreview = package.loaded["mdpreview"]
-  return mdpreview and mdpreview.source_of(buf) or buf
-end
+local peek = require("utils.peek")
 
 local function same_file(a, b)
   return (vim.uv.fs_realpath(a) or a) == (vim.uv.fs_realpath(b) or b)
 end
 
--- Buffer the last jump to the pinned file started from.
+-- Where the last jump to the pinned file started from: the source buffer and,
+-- unless it was a preview, its view.
 local came_from
 
--- Open the pinned file of this project; fall back to the picker.
-function M.open_pinned()
+-- `mods`: command modifiers for the jump (see utils.peek).
+local function jump_to_pinned(mods)
   local pinned = get_pin()
   if not pinned then
     vim.notify("No pinned .md in " .. vim.fn.getcwd())
@@ -133,25 +128,64 @@ function M.open_pinned()
     vim.notify("Pinned .md is gone: " .. pinned, vim.log.levels.WARN)
     return M.pick()
   end
-  local src = current_source()
+  local src = peek.current_source()
   if same_file(vim.api.nvim_buf_get_name(src), pinned) then return end
-  came_from = src
-  vim.cmd.edit(vim.fn.fnameescape(pinned))
+  came_from = {
+    buf = src,
+    view = src == vim.api.nvim_get_current_buf() and vim.fn.winsaveview() or nil,
+  }
+  vim.cmd(mods .. "edit " .. vim.fn.fnameescape(pinned))
 end
 
--- On the pinned file: go back to where the jump came from; elsewhere: jump.
-function M.toggle_pinned()
-  local pinned = get_pin()
-  if not (pinned and same_file(vim.api.nvim_buf_get_name(current_source()), pinned)) then
-    return M.open_pinned()
-  end
-  if came_from and vim.api.nvim_buf_is_valid(came_from) and vim.bo[came_from].buflisted then
-    vim.cmd.buffer(came_from)
+-- Open the pinned file of this project; fall back to the picker.
+function M.open_pinned()
+  jump_to_pinned("")
+end
+
+local function go_back(mods)
+  if came_from and vim.api.nvim_buf_is_valid(came_from.buf) and vim.bo[came_from.buf].buflisted then
+    vim.cmd(mods .. "buffer " .. came_from.buf)
+    if came_from.view then vim.fn.winrestview(came_from.view) end
   elseif vim.fn.bufnr("#") ~= -1 then
-    vim.cmd("edit #")
+    vim.cmd(mods .. "edit #")
   else
     vim.notify("Nowhere to go back from the pinned .md")
   end
+end
+
+peek.watch("<C-m>")
+
+-- On the pinned file: go back to where the jump came from; elsewhere: jump.
+-- Held, it peeks (utils.peek). `from_insert`: Insert mode was left for it.
+function M.toggle_pinned(from_insert)
+  peek.jump("<C-m>", function(mods)
+    local pinned = get_pin()
+    if pinned and same_file(vim.api.nvim_buf_get_name(peek.current_source()), pinned) then
+      go_back(mods)
+    else
+      jump_to_pinned(mods)
+    end
+  end, from_insert)
+end
+
+-- Ctrl+M is a file key only in windows that show a file (or its preview);
+-- elsewhere (floats, quickfix, prompts) it stays Enter.
+local function in_file_window()
+  if vim.api.nvim_win_get_config(0).relative ~= "" then return false end
+  local buf = vim.api.nvim_get_current_buf()
+  return vim.bo[buf].buftype == "" or peek.current_source() ~= buf
+end
+
+-- Leaves Insert mode with the built-in <Esc> (not remapped: blink.cmp's
+-- buffer-local <Esc> would leave it only after the jump, in the other buffer).
+vim.keymap.set("i", "<Plug>(md-files-toggle)", "<Esc><Cmd>lua require('utils.md_files').toggle_pinned(true)<CR>")
+
+-- rhs for `<C-m>` (expr, remap): <CR> outside file windows reaches buffer-local
+-- <CR> maps.
+function M.ctrl_m(insert)
+  if not in_file_window() then return "<CR>" end
+  if insert then return "<Plug>(md-files-toggle)" end
+  return "<Cmd>lua require('utils.md_files').toggle_pinned(false)<CR>"
 end
 
 return M

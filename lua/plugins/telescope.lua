@@ -30,10 +30,18 @@ return {
       -- <C-m> works only where it is not <CR> (Neovide, CSI-u terminals). Mapping it
       -- would also map <CR> unless <CR> is already mapped, so pin <CR> to itself
       -- first (:h vim_diff, "simplifiable key"); buffer-local <CR> maps still win.
-      vim.keymap.set('n', '<CR>', '<CR>')
-      vim.keymap.set('n', '<C-m>', md_files.toggle_pinned, { desc = 'Pinned markdown file / back' })
+      -- Tap: pinned file / back; hold: peek, the release comes back.
+      for _, mode in ipairs({ 'n', 'i' }) do
+        vim.keymap.set(mode, '<CR>', '<CR>')
+        vim.keymap.set(mode, '<C-m>', function() return md_files.ctrl_m(mode == 'i') end,
+          { expr = true, remap = true, desc = 'Pinned markdown file / back; hold to peek' })
+      end
+      -- Alternate file; held, it peeks: the release comes back (utils.peek).
+      -- From Insert mode the alternate file stays in Insert mode.
+      local peek = require("utils.peek")
+      peek.watch('<C-b>')
       vim.keymap.set({ 'n', 'i' }, '<C-b>', function()
-        vim.cmd('edit #')
+        peek.jump('<C-b>', function(mods) vim.cmd(mods .. 'edit #') end)
       end, {})
 
       require("telescope").setup{
