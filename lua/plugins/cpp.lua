@@ -137,7 +137,8 @@ return {
         cmake_virtual_text_support = true,
       })
 
-      cpp().setup_cmake_keymaps()
+      -- CMake is driven from the terminal; <leader>mg belongs to the pinned .md
+      -- cpp().setup_cmake_keymaps()
     end,
   },
 

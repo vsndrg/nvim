@@ -24,6 +24,14 @@ return {
       vim.keymap.set('n', '<leader>b', function()
         builtin.oldfiles({ initial_mode = "normal" })
       end, {})
+      local md_files = require("utils.md_files")
+      vim.keymap.set('n', '<leader>mf', md_files.pick, { desc = 'Markdown files (pin with <C-g> / m)' })
+      vim.keymap.set('n', '<leader>mg', md_files.open_pinned, { desc = 'Open pinned markdown file' })
+      -- <C-m> works only where it is not <CR> (Neovide, CSI-u terminals). Mapping it
+      -- would also map <CR> unless <CR> is already mapped, so pin <CR> to itself
+      -- first (:h vim_diff, "simplifiable key"); buffer-local <CR> maps still win.
+      vim.keymap.set('n', '<CR>', '<CR>')
+      vim.keymap.set('n', '<C-m>', md_files.toggle_pinned, { desc = 'Pinned markdown file / back' })
       vim.keymap.set({ 'n', 'i' }, '<C-b>', function()
         vim.cmd('edit #')
       end, {})

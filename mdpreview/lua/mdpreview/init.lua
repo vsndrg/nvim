@@ -725,6 +725,14 @@ local function current_session()
   return by_view[buf] or sessions[buf], buf
 end
 
+--- The markdown buffer a preview view buffer shows; any other buffer is its own source.
+---@param buf integer
+---@return integer
+function M.source_of(buf)
+  local s = by_view[buf]
+  return s and s.src or buf
+end
+
 ---@param src integer source buffer
 ---@param mode "split"|"preview"|"code"
 function M.open(src, mode)
