@@ -662,6 +662,9 @@ M.lens = {
     if not name:match("^%u") then return nil end
     return vim.fs.basename(dir) .. "." .. name
   end,
+  -- Interfaces are satisfied implicitly: a method added to one breaks every
+  -- implementation until it is written.
+  remember = true,
 }
 
 -- ─────────────────────────────────────────────────────────────────────────────

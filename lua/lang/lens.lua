@@ -19,7 +19,18 @@
 --     queries  = function(sym, parent, bufnr) return { "usages" } end,
 --     up_name  = function(name, uri, own_dir) return name end, -- ↑ label, nil drops it
 --     fallback = "textDocument/definition", -- `gi` when implementation is empty
+--     remember = true, -- keep relations an interface change broke, see below
 --   }
+--
+-- With structural typing (Go) a method added to an interface breaks every
+-- implementation of it until each type has the method too, and the server
+-- answers nothing at all: the marker would lose exactly the targets that need
+-- the new method. A spec with `remember` keeps each relation the server has
+-- confirmed, with the interface's members at that moment. While the server
+-- no longer confirms it, the relation stays as long as the interface has
+-- changed since: added, renamed or re-typed members are what the type is
+-- missing, shown in the warning colour and named in the picker. A relation
+-- broken on the type's side, or whose declarations are gone, is forgotten.
 --
 --   require("lang.lens").attach(bufnr, spec)  -- on LspAttach
 --   require("lang.lens").open(bufnr)          -- ↓ / ↑ targets for the cursor line
@@ -68,13 +79,20 @@ local function cancel_pending(st, client)
 end
 
 -- Every declaration of the document tree, with what the spec asks about it.
+-- `name` is "Shape" for a top-level declaration, "Shape.Area" for a member;
+-- `top` is the top-level one.
 local function collect_queries(symbols, spec, bufnr)
   local queries = {}
   local function walk(list, parent)
     for _, sym in ipairs(list or {}) do
       if sym.selectionRange then
         for _, what in ipairs(spec.queries(sym, parent, bufnr)) do
-          table.insert(queries, { pos = sym.selectionRange.start, what = what })
+          table.insert(queries, {
+            pos = sym.selectionRange.start,
+            what = what,
+            name = parent and (parent.name .. "." .. sym.name) or sym.name,
+            top = parent and parent.name or sym.name,
+          })
         end
       end
       walk(sym.children, sym)
@@ -103,16 +121,59 @@ local function before_or_at(a, b)
   return a.line < b.line or (a.line == b.line and a.character <= b.character)
 end
 
--- Top-level declaration of `symbols` that encloses `pos`: the interface itself
--- for a type-level target, the interface owning the method for a method one.
-local function enclosing_name(symbols, pos)
+local function encloses(sym, pos)
+  local range = sym.range or (sym.location and sym.location.range)
+  return range ~= nil and before_or_at(range.start, pos) and before_or_at(pos, range["end"])
+end
+
+-- Declaration of `symbols` at `pos`, named as in collect_queries, and its
+-- top-level declaration's name: the interface itself for a type-level
+-- target, the interface owning the method for a method one.
+local function symbol_at(symbols, pos)
   for _, sym in ipairs(symbols or {}) do
-    local range = sym.range or (sym.location and sym.location.range)
-    if range and before_or_at(range.start, pos) and before_or_at(pos, range["end"]) then
-      return sym.name
+    if encloses(sym, pos) then
+      for _, child in ipairs(sym.children or {}) do
+        if encloses(child, pos) then return sym.name .. "." .. child.name, sym.name end
+      end
+      return sym.name, sym.name
     end
   end
   return nil
+end
+
+-- The declaration symbol_at() names `name`, or nil once it is gone.
+local function find_symbol(symbols, name)
+  for _, sym in ipairs(symbols or {}) do
+    if sym.name == name then return sym end
+    for _, child in ipairs(sym.children or {}) do
+      if sym.name .. "." .. child.name == name then return child end
+    end
+  end
+  return nil
+end
+
+-- { [member] = signature } of a declaration.
+local function members_of(sym)
+  local members = {}
+  for _, child in ipairs(sym.children or {}) do members[child.name] = child.detail or "" end
+  return members
+end
+
+-- Relations confirmed by the server, for specs with `remember`:
+-- [key] = {
+--   iface   = { uri, name },   -- "Shape" or "Shape.Area"
+--   impl    = { uri, name },   -- "Circle" or "(*Circle).Area"
+--   owner   = "Shape",         -- the interface `members` describe
+--   members = { [name] = signature },  -- owner's members when last confirmed
+--   dirs    = { down = true, up = true },  -- markers that may show it
+-- }
+-- A method relation only goes where the server showed it: ↓ of an interface
+-- method lists a promoted method under the embedded type that declares it,
+-- whose own ↑ never lists the interface.
+local relations = {}
+
+local function relation_key(iface, impl)
+  return ("%s#%s|%s#%s"):format(iface.uri, iface.name, impl.uri, impl.name)
 end
 
 local function plural(n, word)
@@ -125,8 +186,8 @@ end
 local function segments_of(entry)
   local segs = {}
   local function text(t) table.insert(segs, { text = t, hl = "Lens" }) end
-  local function link(t, locations, title)
-    table.insert(segs, { text = t, hl = "LensLink", locations = locations, title = title })
+  local function link(t, locations, title, hl)
+    table.insert(segs, { text = t, hl = hl or "LensLink", locations = locations, title = title })
   end
   local function gap() if #segs > 0 then text(string.rep(" ", GAP)) end end
 
@@ -138,9 +199,17 @@ local function segments_of(entry)
     end
   end
   if #entry.down > 0 then
+    local complete, incomplete = {}, {}
+    for _, loc in ipairs(entry.down) do
+      table.insert(loc.missing and incomplete or complete, loc)
+    end
     gap()
     text("↓ ")
-    link(("%d impl"):format(#entry.down), entry.down, TITLES.down)
+    if #complete > 0 then link(("%d impl"):format(#complete), complete, TITLES.down) end
+    if #incomplete > 0 then
+      if #complete > 0 then text(", ") end
+      link(("%d incomplete"):format(#incomplete), incomplete, TITLES.down, "LensIncomplete")
+    end
   end
   if #entry.up_groups > 0 then
     gap()
@@ -148,7 +217,7 @@ local function segments_of(entry)
     for i = 1, math.min(#entry.up_groups, MAX_NAMES) do
       if i > 1 then text(", ") end
       local grp = entry.up_groups[i]
-      link(grp.name, grp.locations, TITLES.up)
+      link(grp.name, grp.locations, TITLES.up, grp.incomplete and "LensIncomplete" or nil)
     end
     if #entry.up_groups > MAX_NAMES then
       text(", ")
@@ -216,37 +285,137 @@ function M.refresh(bufnr)
 
   local fname = vim.api.nvim_buf_get_name(bufnr)
   local own_dir = vim.fs.dirname(fname)
+  local own_uri = vim.uri_from_bufnr(bufnr)
   local lines = {}
   local function entry_at(line)
     lines[line] = lines[line] or { down = {}, up = {}, up_groups = {}, seen = {} }
     return lines[line]
   end
+  local function add(query, loc)
+    local entry = entry_at(query.pos.line)
+    local key = location_key(loc)
+    if not entry.seen[key] then
+      entry.seen[key] = true
+      table.insert(entry[query.what], loc)
+    end
+  end
 
-  -- Phase 2: name the interfaces behind every ↑ location, one documentSymbol
-  -- request per target file.
-  local function resolve_names()
-    local by_uri = {}
-    for _, entry in pairs(lines) do
-      for _, loc in ipairs(entry.up) do
-        by_uri[loc_uri(loc)] = true
+  -- Each ↓ / ↑ query, as asked by `queries`, that the server answered: by
+  -- "down|Shape" and the like.
+  local function answered_queries(queries)
+    local answered = {}
+    for _, query in ipairs(queries) do
+      if query.locations then answered[query.what .. "|" .. query.name] = query end
+    end
+    return answered
+  end
+
+  -- The query of this buffer a relation is the answer to in direction `what`.
+  local function query_of(answered, rel, what)
+    local own = what == "down" and rel.iface or rel.impl
+    return own.uri == own_uri and answered[what .. "|" .. own.name] or nil
+  end
+
+  -- Records every relation the server has just confirmed, then adds those it
+  -- no longer confirms but an interface change explains, see the top of the
+  -- file.
+  local function remember(queries, symbols_of)
+    local confirmed = {}
+    for _, query in ipairs(queries) do
+      for _, loc in ipairs(query.locations or {}) do
+        local name, top = symbol_at(symbols_of[loc_uri(loc)], loc_start(loc))
+        if name then
+          local here, there = { uri = own_uri, name = query.name }, { uri = loc_uri(loc), name = name }
+          local iface, impl = here, there
+          local owner = query.top
+          if query.what == "up" then iface, impl, owner = there, here, top end
+          local owner_sym = find_symbol(symbols_of[iface.uri], owner)
+          if owner_sym then
+            local key = relation_key(iface, impl)
+            local rel = relations[key] or { dirs = {} }
+            relations[key] = rel
+            rel.iface, rel.impl, rel.owner, rel.members = iface, impl, owner, members_of(owner_sym)
+            -- Type relations hold both ways; see `relations` for methods.
+            if owner == iface.name then
+              rel.dirs.down, rel.dirs.up = true, true
+            else
+              rel.dirs[query.what] = true
+            end
+            confirmed[key] = true
+          end
+        end
       end
     end
-    local symbols_of = {}
+
+    local answered = answered_queries(queries)
+    for key, rel in pairs(relations) do
+      if not confirmed[key] then
+        for what in pairs(rel.dirs) do
+          local query = query_of(answered, rel, what)
+          local other = what == "down" and rel.impl or rel.iface
+          local other_symbols, iface_symbols = symbols_of[other.uri], symbols_of[rel.iface.uri]
+          -- A file the server could not list says nothing either way.
+          if query and other_symbols and iface_symbols then
+            local target = find_symbol(other_symbols, other.name)
+            local owner_sym = find_symbol(iface_symbols, rel.owner)
+            local missing = {}
+            if target and owner_sym then
+              for _, child in ipairs(owner_sym.children or {}) do
+                if rel.members[child.name] ~= (child.detail or "") then
+                  table.insert(missing, child.name)
+                end
+              end
+            end
+            if #missing == 0 then
+              relations[key] = nil
+              break
+            end
+            add(query, { uri = other.uri, range = target.selectionRange, missing = missing })
+          end
+        end
+      end
+    end
+  end
+
+  -- Phase 2: name what every ↓ / ↑ location points at, one documentSymbol
+  -- request per target file, plus the files of remembered relations.
+  local function resolve_names(queries, own_symbols)
+    local symbols_of = { [own_uri] = own_symbols }
+    local by_uri = {}
+    for _, entry in pairs(lines) do
+      for _, loc in ipairs(entry.up) do by_uri[loc_uri(loc)] = true end
+      if st.spec.remember then
+        for _, loc in ipairs(entry.down) do by_uri[loc_uri(loc)] = true end
+      end
+    end
+    if st.spec.remember then
+      local answered = answered_queries(queries)
+      for _, rel in pairs(relations) do
+        for what in pairs(rel.dirs) do
+          if query_of(answered, rel, what) then
+            by_uri[rel.iface.uri], by_uri[rel.impl.uri] = true, true
+          end
+        end
+      end
+    end
+    by_uri[own_uri] = nil
     local remaining = vim.tbl_count(by_uri)
 
     local function finish()
+      if st.spec.remember then remember(queries, symbols_of) end
       for _, entry in pairs(lines) do
         local kept, groups, by_name = {}, {}, {}
         for _, loc in ipairs(entry.up) do
-          local name = enclosing_name(symbols_of[loc_uri(loc)], loc_start(loc))
+          local _, name = symbol_at(symbols_of[loc_uri(loc)], loc_start(loc))
           if name and st.spec.up_name then name = st.spec.up_name(name, loc_uri(loc), own_dir) end
           if name then
             table.insert(kept, loc)
             if not by_name[name] then
-              by_name[name] = { name = name, locations = {} }
+              by_name[name] = { name = name, locations = {}, incomplete = true }
               table.insert(groups, by_name[name])
             end
             table.insert(by_name[name].locations, loc)
+            by_name[name].incomplete = by_name[name].incomplete and loc.missing ~= nil
           end
         end
         entry.up, entry.up_groups = kept, groups
@@ -279,7 +448,7 @@ function M.refresh(bufnr)
 
     local function done()
       remaining = remaining - 1
-      if remaining == 0 then resolve_names() end
+      if remaining == 0 then resolve_names(queries, symbols) end
     end
 
     for _, query in ipairs(queries) do
@@ -298,23 +467,17 @@ function M.refresh(bufnr)
       else
         local params = { textDocument = text_document, position = query.pos }
         sent = request("textDocument/implementation", params, function(impl_err, result)
-          local locations = impl_err and {} or as_list(result)
-          if #locations > 0 then
-            local entry = entry_at(query.pos.line)
-            for _, loc in ipairs(locations) do
-              local key = location_key(loc)
-              if not entry.seen[key] then
-                entry.seen[key] = true
-                table.insert(entry[query.what], loc)
-              end
-            end
+          -- Only an answer may forget a remembered relation, see remember().
+          if not impl_err then
+            query.locations = as_list(result)
+            for _, loc in ipairs(query.locations) do add(query, loc) end
           end
           done()
         end)
       end
       if not sent then remaining = remaining - 1 end
     end
-    if remaining == 0 then resolve_names() end
+    if remaining == 0 then resolve_names(queries, symbols) end
   end)
 end
 
@@ -438,6 +601,10 @@ local function entry_maker(items)
     local name = names[item.filename]
     local code = item.text:gsub("^%s+", "")
     local indent = #item.text - #code
+    local code_len = #code
+    -- What a type of an incomplete relation lacks, after its code.
+    local missing = item.user_data and item.user_data.missing
+    if missing then code = code .. "  missing " .. table.concat(missing, ", ") end
     return {
       value = item,
       ordinal = name .. " " .. code,
@@ -453,9 +620,10 @@ local function entry_maker(items)
           { code, function()
             local hls = {}
             for _, r in ipairs(highlights_of(item.filename, item.lnum - 1)) do
-              local from, to = math.max(r[1] - indent, 0), math.min(r[2] - indent, #code)
+              local from, to = math.max(r[1] - indent, 0), math.min(r[2] - indent, code_len)
               if to > from then table.insert(hls, { { from, to }, r[3] }) end
             end
+            if missing then table.insert(hls, { { code_len + 2, #code }, "DiagnosticWarn" }) end
             return hls
           end },
         })
@@ -500,6 +668,10 @@ local function show(locations, encoding, title, done)
     }):find()
   end)
   if not ok then
+    for _, item in ipairs(items) do
+      local missing = item.user_data and item.user_data.missing
+      if missing then item.text = item.text .. "  missing " .. table.concat(missing, ", ") end
+    end
     vim.fn.setqflist({}, " ", { title = title, items = items })
     vim.cmd("botright copen")
   end
@@ -686,6 +858,9 @@ local function set_highlights()
   local base = { fg = comment.fg, ctermfg = comment.ctermfg, italic = true }
   vim.api.nvim_set_hl(0, "Lens", base)
   vim.api.nvim_set_hl(0, "LensLink", vim.tbl_extend("force", base, { underline = true }))
+  -- A relation the type no longer fulfils: the warning colour.
+  local warn = vim.api.nvim_get_hl(0, { name = "DiagnosticWarn", link = false })
+  vim.api.nvim_set_hl(0, "LensIncomplete", { fg = warn.fg, ctermfg = warn.ctermfg, italic = true, underline = true })
 end
 
 local did_setup = false
