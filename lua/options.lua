@@ -57,6 +57,26 @@ if vim.g.neovide then
   vim.keymap.set('i', '<D-v>', '<C-R>+', { noremap = true })
   vim.keymap.set('t', '<D-v>', '<C-\\><C-n>"+pi', { noremap = true })
 
+  -- Zoom: Cmd+= / Cmd++ bigger, Cmd+- smaller, Cmd+Ctrl+= back to 1.0.
+  -- The scale survives restarts via a file in stdpath('state').
+  local scale_file = vim.fn.stdpath("state") .. "/neovide_scale_factor"
+  local saved = tonumber((vim.fn.filereadable(scale_file) == 1 and vim.fn.readfile(scale_file)[1]) or "")
+  vim.g.neovide_scale_factor = saved or 1.0
+
+  local function set_scale(scale)
+    scale = math.min(math.max(scale, 0.5), 3.0)
+    vim.g.neovide_scale_factor = scale
+    vim.fn.writefile({ ("%.4f"):format(scale) }, scale_file)
+  end
+
+  local zoom_modes = { 'n', 'v', 'i', 'c', 't' }
+  local zoom_in = function() set_scale(vim.g.neovide_scale_factor * 1.05) end
+  vim.keymap.set(zoom_modes, '<D-=>', zoom_in, { desc = "Neovide: zoom in" })
+  vim.keymap.set(zoom_modes, '<D-+>', zoom_in, { desc = "Neovide: zoom in" })
+  vim.keymap.set(zoom_modes, '<D-->', function() set_scale(vim.g.neovide_scale_factor / 1.05) end,
+    { desc = "Neovide: zoom out" })
+  vim.keymap.set(zoom_modes, '<C-D-=>', function() set_scale(1.0) end, { desc = "Neovide: reset zoom" })
+
   -- -- 1. главный виновник: Neovim умножает каждое событие скролла на 3
   -- vim.o.mousescroll = "ver:1,hor:6"      -- по умолчанию ver:3
   --
