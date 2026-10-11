@@ -966,6 +966,51 @@ function M.setup_dap(force)
     request = "attach",
     processId = function() return require("dap.utils").pick_process() end,
   })
+
+  -- Opened through a symlinked directory, Go records file paths via $PWD
+  -- (the symlink) while buffers carry the resolved path, so delve rejects
+  -- every breakpoint. Map the resolved prefix back to the symlinked one.
+  -- Go only takes the $PWD spelling for a relative `program` built from the
+  -- directory $PWD points at (dap-go's debug_test); an absolute one (neotest,
+  -- ${file}) is recorded resolved and already matches the buffers.
+  dap.listeners.on_config["go_substitute_path"] = function(config)
+    if config.type ~= "go" or config.request ~= "launch" or config.substitutePath ~= nil then
+      return config
+    end
+    local program = config.program
+    if type(program) ~= "string" or program:match("^/") or program:match("^%${") then
+      return config
+    end
+    local logical = vim.env.PWD
+    local physical = logical and vim.uv.fs_realpath(logical)
+    if not physical or physical == logical or vim.uv.cwd() ~= physical then return config end
+    config = vim.deepcopy(config)
+    config.substitutePath = { { from = physical, to = logical } }
+    return config
+  end
+
+  -- delve reports fully qualified types (github.com/org/repo/internal/pkg.T),
+  -- which drown dap-ui's scopes/watches. Keep only the package name: pkg.T.
+  -- `before` listeners run ahead of the request callback, so dap-ui renders
+  -- the rewritten body. Only types and composite summaries are touched —
+  -- plain string values are user data and stay verbatim.
+  local function short(s)
+    return type(s) == "string" and s:gsub("[%w_%.%-~]+/", "") or s
+  end
+  local function is_go(session) return session.config.type == "go" end
+
+  dap.listeners.before.variables["go_short_types"] = function(session, err, response)
+    if err or not response or not is_go(session) then return end
+    for _, var in ipairs(response.variables or {}) do
+      var.type = short(var.type)
+      if (var.variablesReference or 0) > 0 then var.value = short(var.value) end
+    end
+  end
+  dap.listeners.before.evaluate["go_short_types"] = function(session, err, response)
+    if err or not response or not is_go(session) then return end
+    response.type = short(response.type)
+    if (response.variablesReference or 0) > 0 then response.result = short(response.result) end
+  end
 end
 
 -- ─────────────────────────────────────────────────────────────────────────────
@@ -983,6 +1028,26 @@ function M.neotest_adapters()
     local flag = M.build_tags_flag(run_root())
     if flag then table.insert(args, flag) end
     return args
+  end
+
+  -- neotest-golang accepts dap_go_opts as a function, but get_dap_config indexes
+  -- it as a table (`attempt to index ... (a function value)` on <leader>td).
+  -- Resolve the function for the duration of that call only.
+  local ok_dap, dap_go = pcall(require, "neotest-golang.features.dap.dap_go")
+  local ok_opts, options = pcall(require, "neotest-golang.options")
+  if ok_dap and ok_opts and not dap_go._resolves_opts_fn then
+    local get_dap_config = dap_go.get_dap_config
+    dap_go.get_dap_config = function(...)
+      local opts = options.get()
+      local fn = opts.dap_go_opts
+      if type(fn) ~= "function" then return get_dap_config(...) end
+      opts.dap_go_opts = fn()
+      local ok_call, result = pcall(get_dap_config, ...)
+      opts.dap_go_opts = fn
+      if not ok_call then error(result, 0) end
+      return result
+    end
+    dap_go._resolves_opts_fn = true
   end
 
   return {
