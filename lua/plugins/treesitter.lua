@@ -73,6 +73,14 @@ return {
         return vim.tbl_contains({ unpack(pred, 3) }, kind)
       end, { force = true })
 
+      -- The archived master branch pins tree-sitter-go from before the grammar
+      -- grew `statement_list`; neotest-golang v2 queries match on that node and
+      -- fail to load, so no Go test is ever discovered. Pin the revision that
+      -- nvim-treesitter's main branch ships. master's own Go queries load fine
+      -- against it. Re-run :TSInstall go after changing this.
+      require("nvim-treesitter.parsers").get_parser_configs().go.install_info.revision =
+        "2346a3ab1bb3857b48b29d779a1ef9799a248cd7"
+
       local config = require("nvim-treesitter.configs")
       config.setup({
         auto_install = true,
