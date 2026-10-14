@@ -68,8 +68,8 @@ return {
   },
 
   ----------------------------------------------------------------------------
-  -- 2. delve. Configured (and re-configured on project switch) from
-  --    lang/go.lua:setup_dap so the debugger sees tag-gated test files.
+  -- 2. delve. Configured from lang/go.lua:setup_dap, which adds the
+  --    debugged module's build tags to every launch.
   --    nvim-dap itself is owned by lua/plugins/debug.lua.
   ----------------------------------------------------------------------------
   {
@@ -77,7 +77,7 @@ return {
     ft = go_filetypes,
     dependencies = { "mfussenegger/nvim-dap" },
     config = function()
-      require("lang.go").setup_dap(true)
+      require("lang.go").setup_dap()
     end,
   },
 

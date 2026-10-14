@@ -4,7 +4,7 @@
 --
 -- Public entrypoints:
 --   require("lang.go").setup()                  -- one-shot startup setup
---   require("lang.go").setup_dap()              -- (re)registers nvim-dap-go
+--   require("lang.go").setup_dap()              -- registers nvim-dap-go
 --   require("lang.go").neotest_adapters()       -- returns adapter list
 --   require("lang.go").build_tags(root)         -- project //go:build tags
 --   require("lang.go").build_tags_flag(root)    -- "-tags=a,b" or nil
@@ -64,13 +64,16 @@ end
 
 -- go.work wins over go.mod: in workspace mode gopls must be rooted at the
 -- workspace, otherwise cross-module navigation resolves to the module cache.
-function M.module_root(bufnr)
-  local dir = buf_dir(bufnr)
+local function dir_module_root(dir)
   local work = find_upward({ "go.work" }, dir)
   if work then return vim.fs.dirname(work) end
   local mod = find_upward({ "go.mod" }, dir)
   if mod then return vim.fs.dirname(mod) end
   return nil
+end
+
+function M.module_root(bufnr)
+  return dir_module_root(buf_dir(bufnr))
 end
 
 -- Root used for running commands: the module root when there is one, the
@@ -200,7 +203,6 @@ function M.refresh_build_tags(root)
   tag_cache[root] = nil
   local tags = M.build_tags(root)
   pcall(vim.cmd, "LspRestart gopls")
-  M.setup_dap()
   vim.notify(
     #tags > 0 and ("Go build tags: " .. table.concat(tags, ", ")) or "Go build tags: none",
     vim.log.levels.INFO
@@ -917,44 +919,27 @@ function M.setup_autocmds()
       if root then tag_cache[root] = nil end
     end,
   })
-
-  -- nvim-dap is owned by lua/plugins/debug.lua; register the Go adapter the
-  -- first time a Go file shows up so delve gets this project's build tags.
-  vim.api.nvim_create_autocmd("FileType", {
-    group = group,
-    pattern = "go",
-    callback = function() M.setup_dap() end,
-  })
 end
 
 -- ─────────────────────────────────────────────────────────────────────────────
 -- DAP (delve via nvim-dap-go)
 -- ─────────────────────────────────────────────────────────────────────────────
 
-local dap_tags_applied = nil
-
--- Re-runs nvim-dap-go's setup whenever the active project's build tags differ
--- from the ones delve was configured with — tests behind `//go:build
--- model_test` are otherwise "no test files" under the debugger.
-function M.setup_dap(force)
+-- Registers delve through nvim-dap-go. Build tags are not baked in here: they
+-- belong to the module being debugged and are added per launch below.
+function M.setup_dap()
   local ok, dap_go = pcall(require, "dap-go")
   if not ok then return end
-
-  local flag = M.build_tags_flag(run_root()) or ""
-  if not force and dap_tags_applied == flag then return end
-  dap_tags_applied = flag
-
   local ok_dap, dap = pcall(require, "dap")
   if not ok_dap then return end
 
   -- nvim-dap-go appends to dap.configurations.go instead of replacing it, so
-  -- re-running setup on a project switch would stack duplicates.
+  -- running setup twice would stack duplicates.
   dap.configurations.go = {}
 
   dap_go.setup({
     delve = {
       path = M.go_bin("dlv"),
-      build_flags = flag,
       detached = true,
     },
   })
@@ -966,6 +951,41 @@ function M.setup_dap(force)
     request = "attach",
     processId = function() return require("dap.utils").pick_process() end,
   })
+
+  -- Tests behind `//go:build model_test` are "no test files" without the tag,
+  -- and delve then fails with "not an executable file". The tags come from
+  -- the module of the package being launched — not from whichever Go buffer
+  -- was opened last (a stdlib file reached by go-to-definition has GOROOT's).
+  -- ${file}-style programs name the current buffer, so its module is used.
+  dap.listeners.on_config["go_build_tags"] = function(config)
+    if config.type ~= "go" or config.request ~= "launch" then return config end
+    local program = config.program
+    local root
+    if type(program) == "string" and not program:match("^%${") then
+      local path = program:match("^/") and program
+        or vim.fs.normalize(vim.fs.joinpath(config.cwd or vim.uv.cwd(), program))
+      local dir = vim.fn.isdirectory(path) == 1 and path or vim.fs.dirname(path)
+      root = dir_module_root(dir) or dir
+    else
+      root = run_root()
+    end
+    local flag = M.build_tags_flag(root)
+    if not flag then return config end
+
+    -- Flags typed into dap-go's "Arguments & Build Flags" prompt arrive as a
+    -- list; an explicit -tags there wins.
+    local flags = config.buildFlags
+    if type(flags) == "table" then
+      if vim.iter(flags):any(function(f) return f:match("^%-%-?tags") ~= nil end) then return config end
+      config = vim.deepcopy(config)
+      table.insert(config.buildFlags, flag)
+    elseif flags == nil or type(flags) == "string" then
+      if flags and flags:match("%-%-?tags") then return config end
+      config = vim.deepcopy(config)
+      config.buildFlags = (flags and flags ~= "") and (flags .. " " .. flag) or flag
+    end
+    return config
+  end
 
   -- Opened through a symlinked directory, Go records file paths via $PWD
   -- (the symlink) while buffers carry the resolved path, so delve rejects
@@ -1030,26 +1050,6 @@ function M.neotest_adapters()
     return args
   end
 
-  -- neotest-golang accepts dap_go_opts as a function, but get_dap_config indexes
-  -- it as a table (`attempt to index ... (a function value)` on <leader>td).
-  -- Resolve the function for the duration of that call only.
-  local ok_dap, dap_go = pcall(require, "neotest-golang.features.dap.dap_go")
-  local ok_opts, options = pcall(require, "neotest-golang.options")
-  if ok_dap and ok_opts and not dap_go._resolves_opts_fn then
-    local get_dap_config = dap_go.get_dap_config
-    dap_go.get_dap_config = function(...)
-      local opts = options.get()
-      local fn = opts.dap_go_opts
-      if type(fn) ~= "function" then return get_dap_config(...) end
-      opts.dap_go_opts = fn()
-      local ok_call, result = pcall(get_dap_config, ...)
-      opts.dap_go_opts = fn
-      if not ok_call then error(result, 0) end
-      return result
-    end
-    dap_go._resolves_opts_fn = true
-  end
-
   return {
     golang({
       -- Mirrors `task test`: `go test -tags=… -race -count=1 -v`.
@@ -1058,17 +1058,14 @@ function M.neotest_adapters()
       -- the tags a `//go:build model_test` file is not listed as a test file at
       -- all and neotest finds nothing to run.
       go_list_args = function() return with_current_tags({}) end,
-      -- neotest-golang re-runs nvim-dap-go's setup before debugging, which would
-      -- otherwise drop the build flags configured in M.setup_dap.
-      dap_go_opts = function()
-        return {
-          delve = {
-            path = M.go_bin("dlv"),
-            build_flags = M.build_tags_flag(run_root()) or "",
-            detached = true,
-          },
-        }
-      end,
+      -- neotest-golang re-runs nvim-dap-go's setup before debugging; keep it
+      -- on the same delve. Build tags are added per launch (M.setup_dap).
+      dap_go_opts = {
+        delve = {
+          path = M.go_bin("dlv"),
+          detached = true,
+        },
+      },
       dap_mode = "dap-go",
       testify_enabled = true,
     }),

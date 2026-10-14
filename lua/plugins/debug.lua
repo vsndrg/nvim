@@ -97,7 +97,7 @@ return {
 
       -- dap.configurations.cpp / .c — see lua/lang/cpp.lua (setup_dap).
       -- dap.configurations.go — see lua/lang/go.lua (setup_dap): nvim-dap-go
-      -- drives delve, re-configured per project so tag-gated tests are built.
+      -- drives delve; each launch gets its module's tags so tag-gated tests build.
 
       local uv = vim.loop
 
