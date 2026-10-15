@@ -226,3 +226,34 @@ end, "Format file (rustfmt)")
 map("v", "<leader>rf", function()
   vim.lsp.buf.format({ async = true })
 end, "Format selection")
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- Format on save (rustfmt via rust-analyzer)
+-- ═══════════════════════════════════════════════════════════════════════════
+-- Per-buffer override: vim.b.rust_format_on_save (nil → on).
+
+local function format_on_save_enabled(bufnr)
+  local override = vim.b[bufnr].rust_format_on_save
+  if override ~= nil then return override end
+  return true
+end
+
+local bufnr = vim.api.nvim_get_current_buf()
+local format_group = vim.api.nvim_create_augroup("RustFormatOnSave", { clear = false })
+-- ftplugin re-runs on every `:set ft=rust`; keep a single hook per buffer.
+vim.api.nvim_clear_autocmds({ group = format_group, buffer = bufnr })
+vim.api.nvim_create_autocmd("BufWritePre", {
+  group = format_group,
+  buffer = bufnr,
+  callback = function(args)
+    if not format_on_save_enabled(args.buf) then return end
+    -- Saving before rust-analyzer attaches: nothing can format yet.
+    if #vim.lsp.get_clients({ bufnr = args.buf, name = "rust-analyzer" }) == 0 then return end
+    vim.lsp.buf.format({ bufnr = args.buf, async = false, timeout_ms = 3000, name = "rust-analyzer" })
+  end,
+})
+
+map("n", "<leader>rF", function()
+  vim.b.rust_format_on_save = not format_on_save_enabled(0)
+  vim.notify("Rust format on save: " .. (vim.b.rust_format_on_save and "ON" or "OFF"))
+end, "Toggle format on save")
